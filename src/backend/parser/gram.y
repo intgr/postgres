@@ -1876,12 +1876,14 @@ alter_table_cmd:
 					$$ = (Node *)n;
 				}
 			/* ALTER TABLE <name> ENABLE TRIGGER USER */
+			/* XXX shift/reduce conflict
 			| ENABLE_P TRIGGER USER
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					n->subtype = AT_EnableTrigUser;
 					$$ = (Node *)n;
 				}
+			*/
 			/* ALTER TABLE <name> DISABLE TRIGGER <trig> */
 			| DISABLE_P TRIGGER name
 				{
@@ -1898,12 +1900,14 @@ alter_table_cmd:
 					$$ = (Node *)n;
 				}
 			/* ALTER TABLE <name> DISABLE TRIGGER USER */
+			/* XXX shift/reduce conflict
 			| DISABLE_P TRIGGER USER
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					n->subtype = AT_DisableTrigUser;
 					$$ = (Node *)n;
 				}
+			*/
 			/* ALTER TABLE <name> ENABLE RULE <rule> */
 			| ENABLE_P RULE name
 				{
@@ -3950,7 +3954,6 @@ CreateUserMappingStmt: CREATE USER MAPPING FOR auth_ident SERVER name create_gen
 /* User mapping authorization identifier */
 auth_ident:
 			CURRENT_USER 	{ $$ = "current_user"; }
-		|	USER			{ $$ = "current_user"; }
 		|	RoleId 			{ $$ = (strcmp($1, "public") == 0) ? NULL : $1; }
 		;
 
@@ -10578,19 +10581,6 @@ func_expr:	func_name '(' ')' over_clause
 					n->location = @1;
 					$$ = (Node *)n;
 				}
-			| USER
-				{
-					FuncCall *n = makeNode(FuncCall);
-					n->funcname = SystemFuncName("current_user");
-					n->args = NIL;
-					n->agg_order = NIL;
-					n->agg_star = FALSE;
-					n->agg_distinct = FALSE;
-					n->func_variadic = FALSE;
-					n->over = NULL;
-					n->location = @1;
-					$$ = (Node *)n;
-				}
 			| CURRENT_CATALOG
 				{
 					FuncCall *n = makeNode(FuncCall);
@@ -12137,6 +12127,7 @@ col_name_keyword:
 			| TIMESTAMP
 			| TREAT
 			| TRIM
+			| USER
 			| VALUES
 			| VARCHAR
 			| XMLATTRIBUTES
@@ -12261,7 +12252,6 @@ reserved_keyword:
 			| TRUE_P
 			| UNION
 			| UNIQUE
-			| USER
 			| USING
 			| VARIADIC
 			| WHEN
