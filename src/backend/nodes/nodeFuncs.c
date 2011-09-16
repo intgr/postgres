@@ -213,6 +213,9 @@ exprType(const Node *expr)
 		case T_BooleanTest:
 			type = BOOLOID;
 			break;
+		case T_CacheExpr:
+			type = exprType((Node *) ((CacheExpr *) expr)->arg);
+			break;
 		case T_CoerceToDomain:
 			type = ((const CoerceToDomain *) expr)->resulttype;
 			break;
@@ -817,6 +820,9 @@ exprCollation(const Node *expr)
 		case T_BooleanTest:
 			coll = InvalidOid;	/* result is always boolean */
 			break;
+		case T_CacheExpr:
+			coll = exprCollation((Node *) ((CacheExpr *) expr)->arg);
+			break;
 		case T_CoerceToDomain:
 			coll = ((const CoerceToDomain *) expr)->resultcollid;
 			break;
@@ -1288,6 +1294,10 @@ exprLocation(const Node *expr)
 			/* just use argument's location */
 			loc = exprLocation((Node *) ((const BooleanTest *) expr)->arg);
 			break;
+		case T_CacheExpr:
+			/* original expression location */
+			loc = exprLocation((Node *) ((CacheExpr *) expr)->arg);
+			break;
 		case T_CoerceToDomain:
 			{
 				const CoerceToDomain *cexpr = (const CoerceToDomain *) expr;
@@ -1747,6 +1757,8 @@ expression_tree_walker(Node *node,
 			return walker(((NullTest *) node)->arg, context);
 		case T_BooleanTest:
 			return walker(((BooleanTest *) node)->arg, context);
+		case T_CacheExpr:
+			return walker(((CacheExpr *) node)->arg, context);
 		case T_CoerceToDomain:
 			return walker(((CoerceToDomain *) node)->arg, context);
 		case T_TargetEntry:
@@ -2399,6 +2411,16 @@ expression_tree_mutator(Node *node,
 				return (Node *) newnode;
 			}
 			break;
+		case T_CacheExpr:
+			{
+				CacheExpr *cache = (CacheExpr *) node;
+				CacheExpr *newnode;
+
+				FLATCOPY(newnode, cache, CacheExpr);
+				MUTATE(newnode->arg, cache->arg, Expr *);
+				return (Node *) newnode;
+			}
+			break;
 		case T_CoerceToDomain:
 			{
 				CoerceToDomain *ctest = (CoerceToDomain *) node;
@@ -2808,6 +2830,8 @@ raw_expression_tree_walker(Node *node,
 			return walker(((NullTest *) node)->arg, context);
 		case T_BooleanTest:
 			return walker(((BooleanTest *) node)->arg, context);
+		case T_CacheExpr:
+			return walker(((CacheExpr *) node)->arg, context);
 		case T_JoinExpr:
 			{
 				JoinExpr   *join = (JoinExpr *) node;
