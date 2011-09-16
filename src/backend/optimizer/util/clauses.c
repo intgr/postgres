@@ -2102,7 +2102,7 @@ Node *
 estimate_expression_value(PlannerInfo *root, Node *node)
 {
 	eval_const_expressions_context context;
-	bool isCachable = true; /* ignored */
+	bool isCachable = false;	/* short-circuit some checks */
 
 	context.boundParams = root->glob->boundParams;		/* bound Params */
 	/* we do not need to mark the plan as depending on inlined functions */
@@ -2121,6 +2121,9 @@ caching_const_expressions_mutator(Node* node,
 		   	   	   	   	   	   	  eval_const_expressions_context *context)
 {
 	bool		isCachable = true;
+
+	if (node == NULL)
+		return NULL;
 
 	node = eval_const_expressions_mutator(node, context, &isCachable);
 	if (isCachable && context->cache)
@@ -2754,14 +2757,12 @@ eval_const_expressions_mutator(Node *node,
 		bool		const_true_cond;
 		Node	   *defresult = NULL;
 		ListCell   *arg;
-		bool		isCachable = true;
 
 		*cachable = false;
 
 		/* Simplify the test expression, if any */
-		newarg = eval_const_expressions_mutator((Node *) caseexpr->arg,
-												context,
-												&isCachable);
+		newarg = caching_const_expressions_mutator((Node *) caseexpr->arg,
+												context);
 
 		/* Set up for contained CaseTestExpr nodes */
 		save_case_val = context->case_val;
@@ -2786,9 +2787,8 @@ eval_const_expressions_mutator(Node *node,
 
 			/* Simplify this alternative's test condition */
 			casecond =
-				eval_const_expressions_mutator((Node *) oldcasewhen->expr,
-											   context,
-											   &isCachable);
+				caching_const_expressions_mutator((Node *) oldcasewhen->expr,
+												  context);
 
 			/*
 			 * If the test condition is constant FALSE (or NULL), then drop
@@ -2807,9 +2807,8 @@ eval_const_expressions_mutator(Node *node,
 
 			/* Simplify this alternative's result value */
 			caseresult =
-				eval_const_expressions_mutator((Node *) oldcasewhen->result,
-											   context,
-											   &isCachable);
+				caching_const_expressions_mutator((Node *) oldcasewhen->result,
+											   context);
 
 			/* If non-constant test condition, emit a new WHEN node */
 			if (!const_true_cond)
@@ -2834,9 +2833,8 @@ eval_const_expressions_mutator(Node *node,
 		/* Simplify the default result, unless we replaced it above */
 		if (!const_true_cond)
 			defresult =
-				eval_const_expressions_mutator((Node *) caseexpr->defresult,
-											   context,
-											   &isCachable);
+				caching_const_expressions_mutator((Node *) caseexpr->defresult,
+											   context);
 
 		context->case_val = save_case_val;
 
@@ -2863,7 +2861,10 @@ eval_const_expressions_mutator(Node *node,
 		if (context->case_val)
 			return copyObject(context->case_val);
 		else
+		{
+			*cachable = false;
 			return copyObject(node);
+		}
 	}
 		case T_ArrayExpr:
 	{
@@ -3703,9 +3704,20 @@ simplify_function(Expr *oldexpr, Oid funcid,
 															PointerGetDatum(oldexpr)));
 
 	if (!newexpr && allow_inline)
+	{
+		/*
+		 * The inlined expression may be cachable regardless if the function's
+		 * volatility was mis-labeled or if it ignores the volatile arguments
+		 * (possibly due to constant folding)
+		 */
+		bool		isCachable = true;
 		newexpr = inline_function(funcid, result_type, result_collid,
 								  input_collid, args,
-								  func_tuple, context, cachable);
+								  func_tuple, context, &isCachable);
+
+		if (newexpr)
+			*cachable = isCachable;
+	}
 
 	ReleaseSysCache(func_tuple);
 
