@@ -51,6 +51,7 @@
 #include "pgstat.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
+#include "utils/datum.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/typcache.h"
@@ -157,6 +158,12 @@ static Datum ExecEvalCoerceToDomain(CoerceToDomainState *cstate,
 static Datum ExecEvalCoerceToDomainValue(ExprState *exprstate,
 							ExprContext *econtext,
 							bool *isNull, ExprDoneCond *isDone);
+static Datum ExecEvalCacheExpr(CacheExprState *cstate,
+				  ExprContext *econtext,
+				  bool *isNull,ExprDoneCond *isDone);
+static Datum ExecEvalCacheExprResult(CacheExprState *cstate,
+						ExprContext *econtext,
+						bool *isNull,ExprDoneCond *isDone);
 static Datum ExecEvalFieldSelect(FieldSelectState *fstate,
 					ExprContext *econtext,
 					bool *isNull, ExprDoneCond *isDone);
@@ -3754,6 +3761,59 @@ ExecEvalBooleanTest(GenericExprState *bstate,
 	}
 }
 
+/* ----------------------------------------------------------------
+ *		ExecEvalCacheExpr
+ *
+ * Evaluates a cachable expression for the first time and updates
+ * xprstate.evalfunc to return cached result next time
+ * ----------------------------------------------------------------
+ */
+static Datum
+ExecEvalCacheExpr(CacheExprState *cstate, ExprContext *econtext,
+				  bool *isNull, ExprDoneCond *isDone)
+{
+	MemoryContext oldcontext;
+	Datum		result;
+	bool		resultTypByVal;
+	int16		resultTypLen;
+	Oid			resultType;
+
+	result = ExecEvalExpr(cstate->subexpr, econtext, isNull, isDone);
+
+	/* Set-returning expressions can't be cached */
+	Assert(isDone == NULL || *isDone == ExprSingleResult);
+
+	resultType = exprType((Node *) ((CacheExpr *) cstate->xprstate.expr)->arg);
+	get_typlenbyval(resultType, &resultTypLen, &resultTypByVal);
+
+	/* This cached datum has to persist for the whole query */
+	oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
+	cstate->result = datumCopy(result, resultTypByVal, resultTypLen);
+	cstate->isNull = *isNull;
+	MemoryContextSwitchTo(oldcontext);
+
+	/* Subsequent calls will return the cached result */
+	cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCacheExprResult;
+
+	return cstate->result;
+}
+
+/* ----------------------------------------------------------------
+ *		ExecEvalCacheExprResult
+ *
+ * Return the already-cached result, computed in ExecEvalCacheExpr
+ * ----------------------------------------------------------------
+ */
+static Datum
+ExecEvalCacheExprResult(CacheExprState *cstate, ExprContext *econtext,
+						bool *isNull, ExprDoneCond *isDone)
+{
+	if (isDone)
+		*isDone = ExprSingleResult;
+	*isNull = cstate->isNull;
+	return cstate->result;
+}
+
 /*
  * ExecEvalCoerceToDomain
  *
@@ -4857,6 +4917,17 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				gstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalBooleanTest;
 				gstate->arg = ExecInitExpr(btest->arg, parent);
 				state = (ExprState *) gstate;
+			}
+			break;
+		case T_CacheExpr:
+			{
+				CacheExpr  *cache = (CacheExpr *) node;
+				CacheExprState *cstate = makeNode(CacheExprState);
+
+				cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCacheExpr;
+				cstate->subexpr = ExecInitExpr(cache->arg, parent);
+
+				state = (ExprState *) cstate;
 			}
 			break;
 		case T_CoerceToDomain:

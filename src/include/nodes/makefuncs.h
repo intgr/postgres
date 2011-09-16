@@ -74,6 +74,7 @@ extern TypeName *makeTypeNameFromOid(Oid typeOid, int32 typmod);
 
 extern FuncExpr *makeFuncExpr(Oid funcid, Oid rettype, List *args,
 			 Oid funccollid, Oid inputcollid, CoercionForm fformat);
+extern CacheExpr *makeCacheExpr(Expr *subexpr);
 
 extern DefElem *makeDefElem(char *name, Node *arg);
 extern DefElem *makeDefElemExtended(char *nameSpace, char *name, Node *arg,
