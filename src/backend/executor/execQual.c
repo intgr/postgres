@@ -3796,7 +3796,7 @@ ExecEvalCacheExpr(CacheExprState *cstate,
 	MemoryContextSwitchTo(oldcontext);
 
 	/* Subsequent calls will return the cached result */
-	cstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalCacheExprResult;
+	cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCacheExprResult;
 
 	return cstate->result;
 }

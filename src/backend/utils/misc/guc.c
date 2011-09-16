@@ -765,6 +765,16 @@ static struct config_bool ConfigureNamesBool[] =
 		NULL, NULL, NULL
 	},
 	{
+		/* XXX Probably won't need this, but it's useful for debugging */
+		{"enable_cacheexpr", PGC_USERSET, QUERY_TUNING_METHOD,
+				gettext_noop("Enables caching of stable execution-time-constant expressions."),
+				NULL
+		},
+		&enable_cacheexpr,
+		true,
+		NULL, NULL, NULL
+	},
+	{
 		{"geqo", PGC_USERSET, QUERY_TUNING_GEQO,
 			gettext_noop("Enables genetic query optimization."),
 			gettext_noop("This algorithm attempts to do planning without "

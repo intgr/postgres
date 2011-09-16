@@ -1,16 +1,21 @@
 --
 -- Test cachable expressions
 --
-create or replace function stable_true() returns bool STABLE language plpgsql as
+-- If the NOTICE outputs of these functions change, you've probably broken
+-- something with the CacheExpr optimization
+--
+create function stable_true() returns bool STABLE language plpgsql as
 $$begin raise notice 'STABLE TRUE'; return true; end;$$;
-create or replace function volatile_true() returns bool VOLATILE language plpgsql as
+create function volatile_true() returns bool VOLATILE language plpgsql as
 $$begin raise notice 'VOLATILE TRUE'; return true; end;$$;
-create or replace function stable_false() returns bool STABLE language plpgsql as
+create function stable_false() returns bool STABLE language plpgsql as
 $$begin raise notice 'STABLE FALSE'; return false; end;$$;
-create or replace function volatile_false() returns bool VOLATILE language plpgsql as
+create function volatile_false() returns bool VOLATILE language plpgsql as
 $$begin raise notice 'VOLATILE FALSE'; return false; end;$$;
+create table two (i int);
+insert into two values (1), (2);
 -- Boolean expressions
-select stable_false() or volatile_true() or stable_true() as b from generate_series(1,2);
+select stable_false() or volatile_true() or stable_true() as b from two;
 NOTICE:  STABLE FALSE
 NOTICE:  STABLE TRUE
  b 
@@ -19,7 +24,7 @@ NOTICE:  STABLE TRUE
  t
 (2 rows)
 
-select stable_true() or volatile_false() or stable_false() as b from generate_series(1,2);
+select stable_true() or volatile_false() or stable_false() as b from two;
 NOTICE:  STABLE TRUE
  b 
 ---
@@ -27,18 +32,7 @@ NOTICE:  STABLE TRUE
  t
 (2 rows)
 
-select stable_false() or volatile_true() as b from generate_series(1,2);
-NOTICE:  STABLE FALSE
-NOTICE:  VOLATILE TRUE
-NOTICE:  VOLATILE TRUE
- b 
----
- t
- t
-(2 rows)
-
-select stable_false() or stable_false() or volatile_true() as b from generate_series(1,2);
-NOTICE:  STABLE FALSE
+select stable_false() or volatile_true() as b from two;
 NOTICE:  STABLE FALSE
 NOTICE:  VOLATILE TRUE
 NOTICE:  VOLATILE TRUE
@@ -48,7 +42,8 @@ NOTICE:  VOLATILE TRUE
  t
 (2 rows)
 
-select volatile_true() or volatile_false() or stable_false() as b from generate_series(1,2);
+select stable_false() or stable_false() or volatile_true() as b from two;
+NOTICE:  STABLE FALSE
 NOTICE:  STABLE FALSE
 NOTICE:  VOLATILE TRUE
 NOTICE:  VOLATILE TRUE
@@ -58,7 +53,17 @@ NOTICE:  VOLATILE TRUE
  t
 (2 rows)
 
-select volatile_false() or volatile_true() or stable_false() as b from generate_series(1,2);
+select volatile_true() or volatile_false() or stable_false() as b from two;
+NOTICE:  STABLE FALSE
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE TRUE
+ b 
+---
+ t
+ t
+(2 rows)
+
+select volatile_false() or volatile_true() or stable_false() as b from two;
 NOTICE:  STABLE FALSE
 NOTICE:  VOLATILE FALSE
 NOTICE:  VOLATILE TRUE
@@ -70,7 +75,7 @@ NOTICE:  VOLATILE TRUE
  t
 (2 rows)
 
-select stable_true() and volatile_false() and stable_false() as b from generate_series(1,2);
+select stable_true() and volatile_false() and stable_false() as b from two;
 NOTICE:  STABLE TRUE
 NOTICE:  STABLE FALSE
  b 
@@ -79,7 +84,7 @@ NOTICE:  STABLE FALSE
  f
 (2 rows)
 
-select stable_false() and volatile_true() and stable_true() as b from generate_series(1,2);
+select stable_false() and volatile_true() and stable_true() as b from two;
 NOTICE:  STABLE FALSE
  b 
 ---
@@ -87,7 +92,7 @@ NOTICE:  STABLE FALSE
  f
 (2 rows)
 
-select stable_true() and volatile_false() as b from generate_series(1,2);
+select stable_true() and volatile_false() as b from two;
 NOTICE:  STABLE TRUE
 NOTICE:  VOLATILE FALSE
 NOTICE:  VOLATILE FALSE
@@ -97,7 +102,7 @@ NOTICE:  VOLATILE FALSE
  f
 (2 rows)
 
-select stable_true() and stable_true() and volatile_false() as b from generate_series(1,2);
+select stable_true() and stable_true() and volatile_false() as b from two;
 NOTICE:  STABLE TRUE
 NOTICE:  STABLE TRUE
 NOTICE:  VOLATILE FALSE
@@ -108,7 +113,7 @@ NOTICE:  VOLATILE FALSE
  f
 (2 rows)
 
-select volatile_true() and volatile_false() and stable_true() as b from generate_series(1,2);
+select volatile_true() and volatile_false() and stable_true() as b from two;
 NOTICE:  STABLE TRUE
 NOTICE:  VOLATILE TRUE
 NOTICE:  VOLATILE FALSE
@@ -120,7 +125,7 @@ NOTICE:  VOLATILE FALSE
  f
 (2 rows)
 
-select volatile_false() and volatile_true() and stable_true() as b from generate_series(1,2);
+select volatile_false() and volatile_true() and stable_true() as b from two;
 NOTICE:  STABLE TRUE
 NOTICE:  VOLATILE FALSE
 NOTICE:  VOLATILE FALSE
@@ -130,7 +135,24 @@ NOTICE:  VOLATILE FALSE
  f
 (2 rows)
 
-prepare param_test(bool) as select $1 or stable_false() or volatile_true() as b from generate_series(1,2);
+select not stable_true() as b from two;
+NOTICE:  STABLE TRUE
+ b 
+---
+ f
+ f
+(2 rows)
+
+select not volatile_true() as b from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE TRUE
+ b 
+---
+ f
+ f
+(2 rows)
+
+prepare param_test(bool) as select $1 or stable_false() or volatile_true() as b from two;
 execute param_test(true);
  b 
 ---
@@ -148,3 +170,174 @@ NOTICE:  VOLATILE TRUE
  t
 (2 rows)
 
+-- Function calls
+create function stable(bool) returns bool STABLE language plpgsql as
+$$begin raise notice 'STABLE(%)', $1; return $1; end;$$;
+create function volatile(bool) returns bool VOLATILE language plpgsql as
+$$begin raise notice 'VOLATILE(%)', $1; return $1; end;$$;
+select volatile(volatile_true()) from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE(t)
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE(t)
+ volatile 
+----------
+ t
+ t
+(2 rows)
+
+select stable(stable_true()) from two;
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE(t)
+ stable 
+--------
+ t
+ t
+(2 rows)
+
+select stable(volatile_true()) from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE(t)
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE(t)
+ stable 
+--------
+ t
+ t
+(2 rows)
+
+select volatile(stable_true()) from two;
+NOTICE:  STABLE TRUE
+NOTICE:  VOLATILE(t)
+NOTICE:  VOLATILE(t)
+ volatile 
+----------
+ t
+ t
+(2 rows)
+
+create function stable(bool, bool) returns bool STABLE language plpgsql as
+$$begin raise notice 'STABLE(%, %)', $1, $2; return $1; end;$$;
+create function volatile(bool, bool) returns bool VOLATILE language plpgsql as
+$$begin raise notice 'VOLATILE(%, %)', $1, $2; return $1; end;$$;
+select stable(volatile_true(), volatile_false()) from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE(t, f)
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE(t, f)
+ stable 
+--------
+ t
+ t
+(2 rows)
+
+select stable(stable_true(), volatile_false()) from two;
+NOTICE:  STABLE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE(t, f)
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE(t, f)
+ stable 
+--------
+ t
+ t
+(2 rows)
+
+select stable(stable_true(), stable_false()) from two;
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE FALSE
+NOTICE:  STABLE(t, f)
+ stable 
+--------
+ t
+ t
+(2 rows)
+
+select volatile(volatile_true(), volatile_false()) from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  VOLATILE(t, f)
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  VOLATILE(t, f)
+ volatile 
+----------
+ t
+ t
+(2 rows)
+
+select volatile(stable_true(), volatile_false()) from two;
+NOTICE:  STABLE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  VOLATILE(t, f)
+NOTICE:  VOLATILE FALSE
+NOTICE:  VOLATILE(t, f)
+ volatile 
+----------
+ t
+ t
+(2 rows)
+
+select volatile(stable_true(), stable_false()) from two;
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE FALSE
+NOTICE:  VOLATILE(t, f)
+NOTICE:  VOLATILE(t, f)
+ volatile 
+----------
+ t
+ t
+(2 rows)
+
+-- Operators
+create function stable_eq(bool, bool) returns bool STABLE language plpgsql as
+$$begin raise notice 'STABLE % == %', $1, $2; return $1 = $2; end;$$;
+create function volatile_eq(bool, bool) returns bool VOLATILE language plpgsql as
+$$begin raise notice 'VOLATILE % =%= %', $1, $2; return $1 = $2; end;$$;
+create operator == (procedure = stable_eq, leftarg=bool, rightarg=bool);
+create operator =%= (procedure = volatile_eq, leftarg=bool, rightarg=bool);
+select volatile_true() == volatile_false() from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE t == f
+ERROR:  Is CacheExpr simple, that is the question?
+CONTEXT:  PL/pgSQL function "stable_eq" line 1 at RETURN
+select stable_true() == volatile_false() from two;
+NOTICE:  STABLE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE t == f
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE t == f
+ ?column? 
+----------
+ f
+ f
+(2 rows)
+
+select stable_true() == stable_false() from two;
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE FALSE
+NOTICE:  STABLE t == f
+ ?column? 
+----------
+ f
+ f
+(2 rows)
+
+select volatile_true() =%= volatile_false() from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE FALSE
+ERROR:  too few parameters specified for RAISE
+CONTEXT:  PL/pgSQL function "volatile_eq" line 1 at RAISE
+select stable_true() =%= volatile_false() from two;
+NOTICE:  STABLE TRUE
+NOTICE:  VOLATILE FALSE
+ERROR:  too few parameters specified for RAISE
+CONTEXT:  PL/pgSQL function "volatile_eq" line 1 at RAISE
+select stable_true() =%= stable_false() from two;
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE FALSE
+ERROR:  too few parameters specified for RAISE
+CONTEXT:  PL/pgSQL function "volatile_eq" line 1 at RAISE

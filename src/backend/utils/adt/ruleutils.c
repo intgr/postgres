@@ -5742,10 +5742,14 @@ get_rule_expr(Node *node, deparse_context *context,
 			{
 				CacheExpr *cache = (CacheExpr *) node;
 
-				appendStringInfo(buf, "CACHE("); /* XXX REMOVE THIS */
+#ifdef DEBUG_CACHEEXPR
+				appendStringInfo(buf, "CACHE[");
 				get_rule_expr((Node *) cache->subexpr, context, true);
-				appendStringInfoChar(buf, ')');
-			}
+				appendStringInfoChar(buf, ']');
+#else
+				get_rule_expr((Node *) cache->subexpr, context, true);
+#endif
+				}
 			break;
 
 		case T_CoerceToDomain:
