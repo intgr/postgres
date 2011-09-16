@@ -5462,6 +5462,11 @@ exec_simple_check_node(Node *node)
 			return TRUE;
 
 		case T_Param:
+			/*
+			 * If we have other kinds of params here, then earlier tests
+			 * should have ruled out this as simple expression
+			 */
+			Assert(((Param *) node)->paramkind == PARAM_EXTERN);
 			return TRUE;
 
 		case T_ArrayRef:
@@ -5693,6 +5698,10 @@ exec_simple_check_node(Node *node)
 
 				return TRUE;
 			}
+
+		case T_CacheExpr:
+			/* Caching is disabled for simple expressions */
+			return TRUE;
 
 		default:
 			return FALSE;
