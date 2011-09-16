@@ -4855,8 +4855,12 @@ isSimpleNode(Node *node, Node *parentNode, int prettyFlags)
 			/* function-like: name(..) or name[..] */
 			return true;
 
-			/* CASE keywords act as parentheses */
+		case T_CacheExpr:
+			/* hidden from user */
+			return true;
+
 		case T_CaseExpr:
+			/* CASE keywords act as parentheses */
 			return true;
 
 		case T_FieldSelect:
@@ -5974,6 +5978,20 @@ get_rule_expr(Node *node, deparse_context *context,
 				}
 				if (!PRETTY_PAREN(context))
 					appendStringInfoChar(buf, ')');
+			}
+			break;
+
+		case T_CacheExpr:
+			{
+				CacheExpr *cache = (CacheExpr *) node;
+
+#ifdef DEBUG_CACHEEXPR
+				appendStringInfo(buf, "CACHE[");
+				get_rule_expr((Node *) cache->arg, context, true);
+				appendStringInfoChar(buf, ']');
+#else
+				get_rule_expr((Node *) cache->arg, context, true);
+#endif
 			}
 			break;
 

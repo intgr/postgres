@@ -1038,6 +1038,21 @@ typedef struct BooleanTest
 } BooleanTest;
 
 /*
+ * CacheExpr
+ *
+ * CacheExpr is a constant expression to be cached at execution time. The
+ * eval_const_expressions() function inserts CacheExpr nodes nodes at
+ * strategic locations when it recognizes constant expressions that cannot be
+ * constant-folded at plan time, such as expressions with Param references,
+ * stable function and operator calls with constant arguments, etc
+ */
+typedef struct CacheExpr
+{
+	Expr		xpr;
+	Expr	   *arg;
+} CacheExpr;
+
+/*
  * CoerceToDomain
  *
  * CoerceToDomain represents the operation of coercing a value to a domain
