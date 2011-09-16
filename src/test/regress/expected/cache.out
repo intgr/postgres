@@ -291,6 +291,45 @@ NOTICE:  VOLATILE(t, f)
  t
 (2 rows)
 
+-- Default arguments
+create function stable_def(a bool = stable_false(), b bool = volatile_true())
+returns bool STABLE language plpgsql as
+$$begin raise notice 'STABLE(%, %)', $1, $2; return $1; end;$$;
+select stable_def() from two;
+NOTICE:  STABLE FALSE
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE(f, t)
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE(f, t)
+ stable_def 
+------------
+ f
+ f
+(2 rows)
+
+select stable_def(b := stable_true()) from two;
+NOTICE:  STABLE FALSE
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE(f, t)
+ stable_def 
+------------
+ f
+ f
+(2 rows)
+
+select stable_def(volatile_false()) from two;
+NOTICE:  VOLATILE FALSE
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE(f, t)
+NOTICE:  VOLATILE FALSE
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE(f, t)
+ stable_def 
+------------
+ f
+ f
+(2 rows)
+
 -- Operators
 create function stable_eq(bool, bool) returns bool STABLE language plpgsql as
 $$begin raise notice 'STABLE % == %', $1, $2; return $1 = $2; end;$$;
@@ -369,3 +408,4 @@ NOTICE:  VOLATILE t =%= f
  f
 (2 rows)
 
+drop table two;

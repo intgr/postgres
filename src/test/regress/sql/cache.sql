@@ -62,6 +62,15 @@ select volatile(volatile_true(), volatile_false()) from two;
 select volatile(stable_true(), volatile_false()) from two;
 select volatile(stable_true(), stable_false()) from two;
 
+-- Default arguments
+create function stable_def(a bool = stable_false(), b bool = volatile_true())
+returns bool STABLE language plpgsql as
+$$begin raise notice 'STABLE(%, %)', $1, $2; return $1; end;$$;
+
+select stable_def() from two;
+select stable_def(b := stable_true()) from two;
+select stable_def(volatile_false()) from two;
+
 -- Operators
 create function stable_eq(bool, bool) returns bool STABLE language plpgsql as
 $$begin raise notice 'STABLE % == %', $1, $2; return $1 = $2; end;$$;
@@ -78,3 +87,4 @@ select volatile_true() =%= volatile_false() from two;
 select stable_true() =%= volatile_false() from two;
 select stable_true() =%= stable_false() from two;
 
+drop table two;

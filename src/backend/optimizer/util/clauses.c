@@ -119,12 +119,12 @@ static Expr *simplify_function(Expr *oldexpr, Oid funcid,
 				  bool allow_inline,
 				  eval_const_expressions_context *context,
 				  bool *cachable);
+static List *simplify_copy_function_arguments(List *old_args, Oid result_type,
+							HeapTuple func_tuple);
 static List *reorder_function_arguments(List *args, Oid result_type,
-						   HeapTuple func_tuple,
-						   eval_const_expressions_context *context);
+						   HeapTuple func_tuple);
 static List *add_function_defaults(List *args, Oid result_type,
-					  HeapTuple func_tuple,
-					  eval_const_expressions_context *context);
+					  HeapTuple func_tuple);
 static List *fetch_function_defaults(HeapTuple func_tuple);
 static void recheck_cast_function_args(List *args, Oid result_type,
 						   HeapTuple func_tuple);
@@ -2201,7 +2201,6 @@ eval_const_expressions_mutator(Node *node,
 	}
 		case T_FuncExpr:
 	{
-		/* XXX cachable? */
 		FuncExpr   *expr = (FuncExpr *) node;
 		List	   *args = expr->args;
 		Expr	   *simple;
@@ -2247,19 +2246,6 @@ eval_const_expressions_mutator(Node *node,
 		List	   *args = expr->args;
 		Expr	   *simple;
 		OpExpr	   *newexpr;
-
-		/*
-		 * Reduce constants in the OpExpr's arguments.  We know args is either
-		 * NIL or a List node, so we can call expression_tree_mutator directly
-		 * rather than recursing to self.
-		 */
-		/*
-		args = (List *) expression_tree_mutator((Node *) expr->args,
-												caching_const_expressions_mutator, // XXX this is clearly wrong
-											  //eval_const_expressions_mutator,
-												(void *) context);
-												//&isCachable);
-												 */
 
 		/*
 		 * Need to get OID of underlying function.	Okay to scribble on input
@@ -2322,19 +2308,12 @@ eval_const_expressions_mutator(Node *node,
 		Expr	   *simple;
 		DistinctExpr *newexpr;
 
-		*cachable = false; /* XXX cachable? */
-
 		/*
 		 * Reduce constants in the DistinctExpr's arguments.  We know args is
 		 * either NIL or a List node, so we can call expression_tree_mutator
 		 * directly rather than recursing to self.
 		 */
-		/*
-		args = (List *) expression_tree_mutator((Node *) expr->args,
-											  //eval_const_expressions_mutator,
-											  caching_const_expressions_mutator, // XXX this is clearly wrong
-												(void *) context);
-		 */
+
 		args = expr->args;
 		/*
 		 * We must do our own check for NULLs because DistinctExpr has
@@ -2383,6 +2362,9 @@ eval_const_expressions_mutator(Node *node,
 									   &args,
 									   false, context,
 									   cachable);
+
+			*cachable = false; /* XXX cachable? */
+
 			if (simple)			/* successfully simplified it */
 			{
 				/*
@@ -2397,6 +2379,8 @@ eval_const_expressions_mutator(Node *node,
 				return (Node *) csimple;
 			}
 		}
+		else
+			*cachable = false; /* XXX cachable? */
 
 		/*
 		 * The expression cannot be simplified any further, so build and
@@ -2557,11 +2541,6 @@ eval_const_expressions_mutator(Node *node,
 		/*
 		 * Reduce constants in the CoerceViaIO's argument.
 		 */
-		/*
-		arg = (Expr *) eval_const_expressions_mutator((Node *) expr->arg,
-													  context,
-													  cachable);
-		*/
 		args = list_make1(expr->arg);
 
 		/*
@@ -3332,7 +3311,6 @@ simplify_or_arguments(List *args,
 			nocache_args = lappend(nocache_args, arg);
 	}
 
-	/* XXX merge this with simplify_and_arguments? */
 	if(cachable_args && nocache_args)
 	{
 		Expr	   *arg;
@@ -3470,7 +3448,6 @@ simplify_and_arguments(List *args,
 			nocache_args = lappend(nocache_args, arg);
 	}
 
-	/* XXX merge this with simplify_or_arguments? */
 	if(cachable_args && nocache_args)
 	{
 		Expr	   *arg;
@@ -3574,7 +3551,7 @@ simplify_boolean_equality(Oid opno, List *args)
  * Inputs are the original expression (can be NULL), function OID, actual
  * result type OID (which is needed for polymorphic functions), result typmod,
  * result collation, the input collation to use for the function, the
- * pre-simplified argument list, and some flags; also the context data for
+ * un-simplified argument list, and some flags; also the context data for
  * eval_const_expressions.  In common cases, several of the arguments could be
  * derived from the original expression.  Sending them separately avoids
  * duplicating NodeTag-specific knowledge, and it's necessary for CoerceViaIO.
@@ -3604,7 +3581,6 @@ simplify_function(Expr *oldexpr, Oid funcid,
 	ListCell   *lc;
 	List	   *args = NIL;
 	List	   *cachable_args = NIL;	/* XXX use bitmapset instead? */
-	bool		has_named_args = false;
 
 	/*
 	 * We have three strategies for simplification: execute the function to
@@ -3618,19 +3594,24 @@ simplify_function(Expr *oldexpr, Oid funcid,
 	if (!HeapTupleIsValid(func_tuple))
 		elog(ERROR, "cache lookup failed for function %u", funcid);
 
-	/*
-	 * Reduce constants in the FuncExpr's arguments, and check to see if
-	 * there are any named args.
-	 */
-	foreach(lc, (*old_args))
+	if(oldexpr && IsA(oldexpr, FuncExpr))
+		/*
+		 * Reorder named arguments and add defaults if needed. Returns a
+		 * copied list, so we can mutate it later.
+		 */
+		args = simplify_copy_function_arguments(*old_args, result_type, func_tuple);
+	else
+		/* Copy argument list before we start mutating it */
+		args = list_copy(*old_args);
+
+	/* Reduce constants in the FuncExpr's arguments */
+	foreach(lc, args)
 	{
 		Node	   *arg = (Node *) lfirst(lc);
 		bool		isCachable = true;
 
 		arg = eval_const_expressions_mutator(arg, context, &isCachable);
-		if (IsA(arg, NamedArgExpr))
-			has_named_args = true;
-		args = lappend(args, arg);
+		lfirst(lc) = arg;
 
 		if (isCachable && context->cache)
 			cachable_args = lappend(cachable_args, arg);
@@ -3639,41 +3620,11 @@ simplify_function(Expr *oldexpr, Oid funcid,
 	}
 
 	/*
-	 * While we have the tuple, reorder named arguments and add default
-	 * arguments if needed.
-	 */
-	if (has_named_args)
-	{
-		*cachable = false;	/* TODO: might be cachable */
-		args = reorder_function_arguments(args, result_type, func_tuple,
-										   context);
-	}
-	else if (((Form_pg_proc) GETSTRUCT(func_tuple))->pronargs > list_length(args))
-		args = add_function_defaults(args, result_type, func_tuple, context);
-
-	/*
 	 * evaluate_function tells us about the cachability of the function call
 	 */
 	newexpr = evaluate_function(funcid, result_type, result_typmod,
 								result_collid, input_collid, args,
 								func_tuple, context, cachable);
-
-	/* If function result isn't cachable, cache all cachable arguments */
-	if (!newexpr && !(*cachable) && !has_named_args &&
-		cachable_args != NIL /*&& context->cache*/)
-	{
-		foreach(lc, args)
-		{
-			Node	   *arg = (Node *) lfirst(lc);
-
-			/* XXX ugly as hell and N^2 to the number of arguments */
-			if (list_member(cachable_args, arg))
-				lfirst(lc) = insert_cache((Expr *) arg);
-		}
-	}
-
-	/* Argument processing done */
-	*old_args = args;
 
 	/*
 	 * Some functions calls can be simplified at plan time based on properties
@@ -3712,9 +3663,11 @@ simplify_function(Expr *oldexpr, Oid funcid,
 	if (!newexpr && allow_inline)
 	{
 		/*
-		 * The inlined expression may be cachable regardless if the function's
-		 * volatility was mis-labeled or if it ignores the volatile arguments
-		 * (possibly due to constant folding)
+		 * The inlined expression may be cachable regardless of the above, if
+		 * the function's volatility was mis-labeled or if volatile parts are
+		 * removed (possible due to constant folding of conditionals).
+		 *
+		 * inline_function() also takes care of caching all cachable subtrees
 		 */
 		bool		isCachable = true;
 		newexpr = inline_function(funcid, result_type, result_collid,
@@ -3727,7 +3680,77 @@ simplify_function(Expr *oldexpr, Oid funcid,
 
 	ReleaseSysCache(func_tuple);
 
+	/*
+	 * If function call can't be cached/inlined, cache all cachable arguments
+	 */
+	if (!newexpr && !(*cachable) && cachable_args != NIL)
+	{
+		foreach(lc, args)
+		{
+			Node	   *arg = (Node *) lfirst(lc);
+
+			/* XXX ugly as hell and N^2 to the number of arguments */
+			if (list_member(cachable_args, arg))
+				lfirst(lc) = insert_cache((Expr *) arg);
+		}
+	}
+
+	/* Argument processing done, give it back to the caller */
+	*old_args = args;
+
 	return newexpr;
+}
+
+/*
+ * This function converts a named-notation argument list into positional
+ * notation while adding any needed default argument expressions
+ *
+ * This function always returns a copy of the argument list, the original
+ * list is not modified.
+ */
+static List *
+simplify_copy_function_arguments(List *old_args, Oid result_type,
+							HeapTuple func_tuple)
+{
+	List	   *args = NIL;
+	ListCell   *lc;
+	bool		has_named_args = false;
+	int			args_before;
+
+	/* Do we need to reorder named arguments? */
+	foreach(lc, old_args)
+	{
+		Node	   *arg = (Node *) lfirst(lc);
+
+		if (IsA(arg, NamedArgExpr))
+		{
+			has_named_args = true;
+			break;
+		}
+	}
+
+	args_before = list_length(old_args);
+
+	/*
+	 * Reorder named arguments and add default arguments if needed.
+	 */
+	if (has_named_args)
+		args = reorder_function_arguments(old_args, result_type, func_tuple);
+
+	else
+	{
+		args = list_copy(old_args);
+
+		/* Append missing default arguments to the list */
+		if (((Form_pg_proc) GETSTRUCT(func_tuple))->pronargs > list_length(args))
+			args = add_function_defaults(args, result_type, func_tuple);
+	}
+
+	if (list_length(args) != args_before)
+		/* Added defaults may need casts */
+		recheck_cast_function_args(args, result_type, func_tuple);
+
+	return args;
 }
 
 /*
@@ -3737,14 +3760,12 @@ simplify_function(Expr *oldexpr, Oid funcid,
  * impossible to form a truly valid positional call without that.
  */
 static List *
-reorder_function_arguments(List *args, Oid result_type, HeapTuple func_tuple,
-						   eval_const_expressions_context *context)
+reorder_function_arguments(List *args, Oid result_type, HeapTuple func_tuple)
 {
 	Form_pg_proc funcform = (Form_pg_proc) GETSTRUCT(func_tuple);
 	int			pronargs = funcform->pronargs;
 	int			nargsprovided = list_length(args);
 	Node	   *argarray[FUNC_MAX_ARGS];
-	Bitmapset  *defargnumbers;
 	ListCell   *lc;
 	int			i;
 
@@ -3778,7 +3799,6 @@ reorder_function_arguments(List *args, Oid result_type, HeapTuple func_tuple,
 	 * Fetch default expressions, if needed, and insert into array at proper
 	 * locations (they aren't necessarily consecutive or all used)
 	 */
-	defargnumbers = NULL;
 	if (nargsprovided < pronargs)
 	{
 		List	   *defaults = fetch_function_defaults(func_tuple);
@@ -3787,10 +3807,7 @@ reorder_function_arguments(List *args, Oid result_type, HeapTuple func_tuple,
 		foreach(lc, defaults)
 		{
 			if (argarray[i] == NULL)
-			{
 				argarray[i] = (Node *) lfirst(lc);
-				defargnumbers = bms_add_member(defargnumbers, i);
-			}
 			i++;
 		}
 	}
@@ -3803,35 +3820,6 @@ reorder_function_arguments(List *args, Oid result_type, HeapTuple func_tuple,
 		args = lappend(args, argarray[i]);
 	}
 
-	/* Recheck argument types and add casts if needed */
-	recheck_cast_function_args(args, result_type, func_tuple);
-
-	/*
-	 * Lastly, we have to recursively simplify the defaults we just added (but
-	 * don't recurse on the args passed in, as we already did those). This
-	 * isn't merely an optimization, it's *necessary* since there could be
-	 * functions with named or defaulted arguments down in there.
-	 *
-	 * Note that we do this last in hopes of simplifying any typecasts that
-	 * were added by recheck_cast_function_args --- there shouldn't be any new
-	 * casts added to the explicit arguments, but casts on the defaults are
-	 * possible.
-	 */
-	if (defargnumbers != NULL)
-	{
-		i = 0;
-		foreach(lc, args)
-		{
-			bool		isCachable = true; /* XXX need to return to caller */
-
-			if (bms_is_member(i, defargnumbers))
-				lfirst(lc) = eval_const_expressions_mutator((Node *) lfirst(lc),
-															context,
-															&isCachable);
-			i++;
-		}
-	}
-
 	return args;
 }
 
@@ -3842,21 +3830,17 @@ reorder_function_arguments(List *args, Oid result_type, HeapTuple func_tuple,
  * and so we know we just need to add defaults at the end.
  */
 static List *
-add_function_defaults(List *args, Oid result_type, HeapTuple func_tuple,
-					  eval_const_expressions_context *context)
+add_function_defaults(List *args, Oid result_type, HeapTuple func_tuple)
 {
 	Form_pg_proc funcform = (Form_pg_proc) GETSTRUCT(func_tuple);
-	int			nargsprovided = list_length(args);
 	List	   *defaults;
 	int			ndelete;
-	ListCell   *lc;
-	bool		isCachable = true; /* XXX this has to be returned to the caller */
 
 	/* Get all the default expressions from the pg_proc tuple */
 	defaults = fetch_function_defaults(func_tuple);
 
 	/* Delete any unused defaults from the list */
-	ndelete = nargsprovided + list_length(defaults) - funcform->pronargs;
+	ndelete = list_length(args) + list_length(defaults) - funcform->pronargs;
 	if (ndelete < 0)
 		elog(ERROR, "not enough default arguments");
 	while (ndelete-- > 0)
@@ -3864,29 +3848,6 @@ add_function_defaults(List *args, Oid result_type, HeapTuple func_tuple,
 
 	/* And form the combined argument list */
 	args = list_concat(args, defaults);
-
-	/* Recheck argument types and add casts if needed */
-	recheck_cast_function_args(args, result_type, func_tuple);
-
-	/*
-	 * Lastly, we have to recursively simplify the defaults we just added (but
-	 * don't recurse on the args passed in, as we already did those). This
-	 * isn't merely an optimization, it's *necessary* since there could be
-	 * functions with named or defaulted arguments down in there.
-	 *
-	 * Note that we do this last in hopes of simplifying any typecasts that
-	 * were added by recheck_cast_function_args --- there shouldn't be any new
-	 * casts added to the explicit arguments, but casts on the defaults are
-	 * possible.
-	 */
-	foreach(lc, args)
-	{
-		if (nargsprovided-- > 0)
-			continue;			/* skip original arg positions */
-		lfirst(lc) = eval_const_expressions_mutator((Node *) lfirst(lc),
-													context,
-													&isCachable);
-	}
 
 	return args;
 }

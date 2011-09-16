@@ -91,6 +91,7 @@ test: prepared_xacts
 test: privileges
 test: security_label
 test: collate
+test: cache
 test: misc
 test: rules
 test: select_views
