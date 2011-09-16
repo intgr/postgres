@@ -172,6 +172,7 @@ typedef enum NodeTag
 	T_JoinExpr,
 	T_FromExpr,
 	T_IntoClause,
+	T_CacheExpr,
 
 	/*
 	 * TAGS FOR EXPRESSION STATE NODES (execnodes.h)
@@ -205,6 +206,7 @@ typedef enum NodeTag
 	T_NullTestState,
 	T_CoerceToDomainState,
 	T_DomainConstraintState,
+	T_CacheExprState,
 
 	/*
 	 * TAGS FOR PLANNER NODES (relation.h)

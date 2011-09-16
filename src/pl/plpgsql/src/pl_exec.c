@@ -5658,6 +5658,11 @@ exec_simple_check_node(Node *node)
 		case T_BooleanTest:
 			return exec_simple_check_node((Node *) ((BooleanTest *) node)->arg);
 
+		case T_CacheExpr:
+			 /* XXX should disable cache for simple expressions! */
+			elog(ERROR, "Is CacheExpr simple, that is the question?");
+			return FALSE;
+
 		case T_CoerceToDomain:
 			return exec_simple_check_node((Node *) ((CoerceToDomain *) node)->arg);
 

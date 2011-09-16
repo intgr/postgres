@@ -673,6 +673,22 @@ typedef struct FuncExprState
 } FuncExprState;
 
 /* ----------------
+ *		CacheExprState node
+ *
+ * Takes care of caching execution-time constants (that cannot be cached at
+ * plan-time).
+ * ----------------
+ */
+typedef struct CacheExprState
+{
+	ExprState	xprstate;
+	ExprState  *subexpr;	/* state of sub-expression */
+
+	Datum		result;		/* cached result */
+	bool		isNull;		/* is result NULL? */
+} CacheExprState;
+
+/* ----------------
  *		ScalarArrayOpExprState node
  *
  * This is a FuncExprState plus some additional data.

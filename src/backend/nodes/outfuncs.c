@@ -1367,6 +1367,14 @@ _outBooleanTest(StringInfo str, BooleanTest *node)
 }
 
 static void
+_outCacheExpr(StringInfo str, CacheExpr *node)
+{
+	WRITE_NODE_TYPE("CACHEEXPR");
+
+	WRITE_NODE_FIELD(subexpr);
+}
+
+static void
 _outCoerceToDomain(StringInfo str, CoerceToDomain *node)
 {
 	WRITE_NODE_TYPE("COERCETODOMAIN");
@@ -2917,6 +2925,9 @@ _outNode(StringInfo str, void *obj)
 				break;
 			case T_BooleanTest:
 				_outBooleanTest(str, obj);
+				break;
+			case T_CacheExpr:
+				_outCacheExpr(str, obj);
 				break;
 			case T_CoerceToDomain:
 				_outCoerceToDomain(str, obj);

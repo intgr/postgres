@@ -212,6 +212,9 @@ exprType(Node *expr)
 		case T_BooleanTest:
 			type = BOOLOID;
 			break;
+		case T_CacheExpr:
+			type = exprType((Node *) ((CacheExpr *) expr)->subexpr);
+			break;
 		case T_CoerceToDomain:
 			type = ((CoerceToDomain *) expr)->resulttype;
 			break;
@@ -792,6 +795,9 @@ exprCollation(Node *expr)
 		case T_BooleanTest:
 			coll = InvalidOid;	/* result is always boolean */
 			break;
+		case T_CacheExpr:
+			coll = exprCollation((Node *) ((CacheExpr *) expr)->subexpr);
+			break;
 		case T_CoerceToDomain:
 			coll = ((CoerceToDomain *) expr)->resultcollid;
 			break;
@@ -987,6 +993,7 @@ exprSetCollation(Node *expr, Oid collation)
 		case T_BooleanTest:
 			Assert(!OidIsValid(collation));		/* result is always boolean */
 			break;
+		/* XXX CacheExpr should never need collation, right? right? */
 		case T_CoerceToDomain:
 			((CoerceToDomain *) expr)->resultcollid = collation;
 			break;
@@ -1262,6 +1269,10 @@ exprLocation(Node *expr)
 		case T_BooleanTest:
 			/* just use argument's location */
 			loc = exprLocation((Node *) ((BooleanTest *) expr)->arg);
+			break;
+		case T_CacheExpr:
+			/* original expression location */
+			loc = exprLocation((Node *) ((CacheExpr *) expr)->subexpr);
 			break;
 		case T_CoerceToDomain:
 			{
@@ -1722,6 +1733,8 @@ expression_tree_walker(Node *node,
 			return walker(((NullTest *) node)->arg, context);
 		case T_BooleanTest:
 			return walker(((BooleanTest *) node)->arg, context);
+		case T_CacheExpr:
+			return walker(((CacheExpr *) node)->subexpr, context);
 		case T_CoerceToDomain:
 			return walker(((CoerceToDomain *) node)->arg, context);
 		case T_TargetEntry:
@@ -2374,6 +2387,16 @@ expression_tree_mutator(Node *node,
 				return (Node *) newnode;
 			}
 			break;
+		case T_CacheExpr:
+			{
+				CacheExpr *cache = (CacheExpr *) node;
+				CacheExpr *newnode;
+
+				FLATCOPY(newnode, cache, CacheExpr);
+				MUTATE(newnode->subexpr, cache->subexpr, Expr *);
+				return (Node *) newnode;
+			}
+			break;
 		case T_CoerceToDomain:
 			{
 				CoerceToDomain *ctest = (CoerceToDomain *) node;
@@ -2781,6 +2804,8 @@ bool
 			return walker(((NullTest *) node)->arg, context);
 		case T_BooleanTest:
 			return walker(((BooleanTest *) node)->arg, context);
+		case T_CacheExpr:
+			return walker(((CacheExpr *) node)->subexpr, context);
 		case T_JoinExpr:
 			{
 				JoinExpr   *join = (JoinExpr *) node;

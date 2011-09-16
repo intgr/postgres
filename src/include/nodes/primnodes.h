@@ -1029,6 +1029,17 @@ typedef struct BooleanTest
 } BooleanTest;
 
 /*
+ * CacheExpr
+ *
+ * XXX
+ */
+typedef struct CacheExpr
+{
+	Expr		xpr;
+	Expr	   *subexpr;
+} CacheExpr;
+
+/*
  * CoerceToDomain
  *
  * CoerceToDomain represents the operation of coercing a value to a domain

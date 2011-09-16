@@ -471,6 +471,21 @@ makeFuncExpr(Oid funcid, Oid rettype, List *args,
 }
 
 /*
+ * makeCacheExpr -
+ *	build an expression tree for a cachable expression.
+ */
+CacheExpr *
+makeCacheExpr(Expr *subexpr)
+{
+	CacheExpr  *cacheexpr;
+
+	cacheexpr = makeNode(CacheExpr);
+	cacheexpr->subexpr = subexpr;
+
+	return cacheexpr;
+}
+
+/*
  * makeDefElem -
  *	build a DefElem node
  *
