@@ -5749,7 +5749,7 @@ get_rule_expr(Node *node, deparse_context *context,
 #else
 				get_rule_expr((Node *) cache->subexpr, context, true);
 #endif
-				}
+			}
 			break;
 
 		case T_CoerceToDomain:

@@ -66,7 +66,7 @@ select volatile(stable_true(), stable_false()) from two;
 create function stable_eq(bool, bool) returns bool STABLE language plpgsql as
 $$begin raise notice 'STABLE % == %', $1, $2; return $1 = $2; end;$$;
 create function volatile_eq(bool, bool) returns bool VOLATILE language plpgsql as
-$$begin raise notice 'VOLATILE % =%= %', $1, $2; return $1 = $2; end;$$;
+$$begin raise notice 'VOLATILE % =%%= %', $1, $2; return $1 = $2; end;$$;
 
 create operator == (procedure = stable_eq, leftarg=bool, rightarg=bool);
 create operator =%= (procedure = volatile_eq, leftarg=bool, rightarg=bool);

@@ -1934,7 +1934,6 @@ range_table_walker(List *rtable,
 	return false;
 }
 
-
 /*
  * expression_tree_mutator() is designed to support routines that make a
  * modified copy of an expression tree, with some nodes being added,
@@ -2545,6 +2544,16 @@ expression_tree_mutator(Node *node,
 	return NULL;
 }
 
+/*
+ * A small decorator over expression_tree_mutator to just return a deep copy
+ * of the whole expression tree.
+ */
+Node *
+expression_tree_copy_mutator(Node *node,
+							 void *context)
+{
+	return expression_tree_mutator(node, expression_tree_copy_mutator, NULL);
+}
 
 /*
  * query_tree_mutator --- initiate modification of a Query's expressions

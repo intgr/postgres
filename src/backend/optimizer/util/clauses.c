@@ -2117,7 +2117,7 @@ estimate_expression_value(PlannerInfo *root, Node *node)
 
 
 static Node *
-caching_const_expressions_mutator(Node* node,
+caching_const_expressions_mutator(Node *node,
 		   	   	   	   	   	   	  eval_const_expressions_context *context)
 {
 	bool		isCachable = true;
@@ -2149,7 +2149,12 @@ eval_const_expressions_mutator(Node *node,
 	{
 		Param	   *param = (Param *) node;
 
-		//*cachable = true;
+		/*
+		 * Only externally-supplied parameters are stable. Other params are
+		 * used for passing changing values within the executor
+		 */
+		if (param->paramkind != PARAM_EXTERN)
+			*cachable = false;
 
 		/* Look to see if we've been given a value for this Param */
 		if (param->paramkind == PARAM_EXTERN &&
@@ -2493,7 +2498,6 @@ eval_const_expressions_mutator(Node *node,
 		return node;
 		case T_RelabelType:
 	{
-		// XXX cachable assigned by recursion ???
 		/*
 		 * If we can simplify the input to a constant, then we don't need the
 		 * RelabelType node anymore: just change the type field of the Const
@@ -2868,24 +2872,21 @@ eval_const_expressions_mutator(Node *node,
 	}
 		case T_ArrayExpr:
 	{
-		/* XXX cachable? */
 		ArrayExpr  *arrayexpr = (ArrayExpr *) node;
 		ArrayExpr  *newarray;
 		bool		all_const = true;
 		List	   *newelems;
 		ListCell   *element;
-		bool		isCachable = true;
 
-		*cachable = false; /* XXX */
+		*cachable = false; /* XXX cachable! */
 
 		newelems = NIL;
 		foreach(element, arrayexpr->elements)
 		{
 			Node	   *e;
 
-			e = eval_const_expressions_mutator((Node *) lfirst(element),
-											   context,
-											   &isCachable);
+			e = caching_const_expressions_mutator((Node *) lfirst(element),
+												  context);
 			if (!IsA(e, Const))
 				all_const = false;
 			newelems = lappend(newelems, e);
@@ -2913,7 +2914,6 @@ eval_const_expressions_mutator(Node *node,
 		CoalesceExpr *newcoalesce;
 		List	   *newargs;
 		ListCell   *arg;
-		bool		isCachable = true;
 
 		*cachable = false; /* XXX cachable? */
 
@@ -2922,9 +2922,8 @@ eval_const_expressions_mutator(Node *node,
 		{
 			Node	   *e;
 
-			e = eval_const_expressions_mutator((Node *) lfirst(arg),
-											   context,
-											   &isCachable);
+			e = caching_const_expressions_mutator((Node *) lfirst(arg),
+												  context);
 
 			/*
 			 * We can remove null constants from the list. For a non-null
@@ -2974,13 +2973,11 @@ eval_const_expressions_mutator(Node *node,
 		FieldSelect *fselect = (FieldSelect *) node;
 		FieldSelect *newfselect;
 		Node	   *arg;
-		bool		isCachable = true;
 
 		*cachable = false; /* XXX cachable? */
 
-		arg = eval_const_expressions_mutator((Node *) fselect->arg,
-											 context,
-											 &isCachable);
+		arg = caching_const_expressions_mutator((Node *) fselect->arg,
+												context);
 		if (arg && IsA(arg, Var) &&
 			((Var *) arg)->varattno == InvalidAttrNumber)
 		{
@@ -3030,13 +3027,10 @@ eval_const_expressions_mutator(Node *node,
 		NullTest   *ntest = (NullTest *) node;
 		NullTest   *newntest;
 		Node	   *arg;
-		bool		isCachable = true;
-
-		*cachable = false; /* XXX cachable? */
 
 		arg = eval_const_expressions_mutator((Node *) ntest->arg,
 											 context,
-											 &isCachable);
+											 cachable);
 		if (arg && IsA(arg, RowExpr))
 		{
 			/*
@@ -3176,32 +3170,44 @@ eval_const_expressions_mutator(Node *node,
 			if (context->estimate)
 			{
 				PlaceHolderVar *phv = (PlaceHolderVar *) node;
-				bool		isCachable = true;
 
 				return eval_const_expressions_mutator((Node *) phv->phexpr,
 													  context,
-													  &isCachable);
+													  cachable);
 			}
 			break;
 		case T_CacheExpr:
 	{
-		if (context->cache)
-			elog(ERROR, "Whatcha doing MR? This expression is already marked cachable");
+		/*
+		 * This may be called for an already-simplified expression as part of
+		 * a new, deeper expression, for example due to inlining. Strip cache
+		 * from here and hope that the caller can insert a new CacheExpr in a
+		 * better place. Or if context->cache is false, this CacheExpr must
+		 * be removed anyway.
+		 *
+		 * We know for a fact that the sub-expression is cachable and already
+		 * simplified, so don't bother recursing -- just copy the tree.
+		 *
+		 * XXX Can other code modify the sub-expression in ways that could
+		 * affect cachability or need to be re-simplified?
+		 */
+		CacheExpr *cache = (CacheExpr *) node;
+
+		return expression_tree_copy_mutator((Node *) cache->subexpr, NULL);
 	}
 		default:
 			break;
 	}
 
-	/* Everything else is not cachable -- must be something weird! */
 	if (!IsA(node, Const))
-		*cachable = false;
+		*cachable = false; /* Everything else is not cachable */
 
 	/*
 	 * For any node type not handled above, we recurse using
 	 * expression_tree_mutator, which will copy the node unchanged but try to
 	 * simplify its arguments (if any) using this routine. For example: we
 	 * cannot eliminate an ArrayRef node, but we might be able to simplify
-	 * constant expressions in its subscripts.
+	 * or cache constant expressions in its subscripts.
 	 */
 	return expression_tree_mutator(node, //eval_const_expressions_mutator,
 								   caching_const_expressions_mutator,
@@ -4476,7 +4482,6 @@ insert_cache(Expr *expr)
 		return expr;
 	if (IsA(expr, Param))
 		return expr;
-
 	Assert(!IsA(expr, CacheExpr));
 
 	return (Expr *) makeCacheExpr(expr);

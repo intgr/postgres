@@ -295,15 +295,22 @@ NOTICE:  VOLATILE(t, f)
 create function stable_eq(bool, bool) returns bool STABLE language plpgsql as
 $$begin raise notice 'STABLE % == %', $1, $2; return $1 = $2; end;$$;
 create function volatile_eq(bool, bool) returns bool VOLATILE language plpgsql as
-$$begin raise notice 'VOLATILE % =%= %', $1, $2; return $1 = $2; end;$$;
+$$begin raise notice 'VOLATILE % =%%= %', $1, $2; return $1 = $2; end;$$;
 create operator == (procedure = stable_eq, leftarg=bool, rightarg=bool);
 create operator =%= (procedure = volatile_eq, leftarg=bool, rightarg=bool);
 select volatile_true() == volatile_false() from two;
 NOTICE:  VOLATILE TRUE
 NOTICE:  VOLATILE FALSE
 NOTICE:  STABLE t == f
-ERROR:  Is CacheExpr simple, that is the question?
-CONTEXT:  PL/pgSQL function "stable_eq" line 1 at RETURN
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE t == f
+ ?column? 
+----------
+ f
+ f
+(2 rows)
+
 select stable_true() == volatile_false() from two;
 NOTICE:  STABLE TRUE
 NOTICE:  VOLATILE FALSE
@@ -329,15 +336,36 @@ NOTICE:  STABLE t == f
 select volatile_true() =%= volatile_false() from two;
 NOTICE:  VOLATILE TRUE
 NOTICE:  VOLATILE FALSE
-ERROR:  too few parameters specified for RAISE
-CONTEXT:  PL/pgSQL function "volatile_eq" line 1 at RAISE
+NOTICE:  VOLATILE t =%= f
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  VOLATILE t =%= f
+ ?column? 
+----------
+ f
+ f
+(2 rows)
+
 select stable_true() =%= volatile_false() from two;
 NOTICE:  STABLE TRUE
 NOTICE:  VOLATILE FALSE
-ERROR:  too few parameters specified for RAISE
-CONTEXT:  PL/pgSQL function "volatile_eq" line 1 at RAISE
+NOTICE:  VOLATILE t =%= f
+NOTICE:  VOLATILE FALSE
+NOTICE:  VOLATILE t =%= f
+ ?column? 
+----------
+ f
+ f
+(2 rows)
+
 select stable_true() =%= stable_false() from two;
 NOTICE:  STABLE TRUE
 NOTICE:  STABLE FALSE
-ERROR:  too few parameters specified for RAISE
-CONTEXT:  PL/pgSQL function "volatile_eq" line 1 at RAISE
+NOTICE:  VOLATILE t =%= f
+NOTICE:  VOLATILE t =%= f
+ ?column? 
+----------
+ f
+ f
+(2 rows)
+
