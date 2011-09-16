@@ -1677,6 +1677,19 @@ _copyBooleanTest(const BooleanTest *from)
 }
 
 /*
+ * _copyCacheExpr
+ */
+static CacheExpr *
+_copyCacheExpr(const CacheExpr *from)
+{
+	CacheExpr *newnode = makeNode(CacheExpr);
+
+	COPY_NODE_FIELD(arg);
+
+	return newnode;
+}
+
+/*
  * _copyCoerceToDomain
  */
 static CoerceToDomain *
@@ -4071,6 +4084,9 @@ copyObject(const void *from)
 			break;
 		case T_BooleanTest:
 			retval = _copyBooleanTest(from);
+			break;
+		case T_CacheExpr:
+			retval = _copyCacheExpr(from);
 			break;
 		case T_CoerceToDomain:
 			retval = _copyCoerceToDomain(from);

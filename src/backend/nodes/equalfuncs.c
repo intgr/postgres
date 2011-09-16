@@ -630,6 +630,14 @@ _equalBooleanTest(const BooleanTest *a, const BooleanTest *b)
 }
 
 static bool
+_equalCacheExpr(const CacheExpr *a, const CacheExpr *b)
+{
+	COMPARE_NODE_FIELD(arg);
+
+	return true;
+}
+
+static bool
 _equalCoerceToDomain(const CoerceToDomain *a, const CoerceToDomain *b)
 {
 	COMPARE_NODE_FIELD(arg);
@@ -2568,6 +2576,9 @@ equal(const void *a, const void *b)
 			break;
 		case T_BooleanTest:
 			retval = _equalBooleanTest(a, b);
+			break;
+		case T_CacheExpr:
+			retval = _equalCacheExpr(a, b);
 			break;
 		case T_CoerceToDomain:
 			retval = _equalCoerceToDomain(a, b);
