@@ -480,7 +480,7 @@ makeCacheExpr(Expr *subexpr)
 	CacheExpr  *cacheexpr;
 
 	cacheexpr = makeNode(CacheExpr);
-	cacheexpr->subexpr = subexpr;
+	cacheexpr->arg = subexpr;
 
 	return cacheexpr;
 }

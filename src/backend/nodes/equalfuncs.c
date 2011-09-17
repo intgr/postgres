@@ -680,7 +680,7 @@ _equalBooleanTest(BooleanTest *a, BooleanTest *b)
 static bool
 _equalCacheExpr(CacheExpr *a, CacheExpr *b)
 {
-	COMPARE_NODE_FIELD(subexpr);
+	COMPARE_NODE_FIELD(arg);
 
 	return true;
 }

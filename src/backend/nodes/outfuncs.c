@@ -1371,7 +1371,7 @@ _outCacheExpr(StringInfo str, CacheExpr *node)
 {
 	WRITE_NODE_TYPE("CACHEEXPR");
 
-	WRITE_NODE_FIELD(subexpr);
+	WRITE_NODE_FIELD(arg);
 }
 
 static void

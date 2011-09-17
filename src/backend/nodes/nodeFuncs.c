@@ -213,7 +213,7 @@ exprType(Node *expr)
 			type = BOOLOID;
 			break;
 		case T_CacheExpr:
-			type = exprType((Node *) ((CacheExpr *) expr)->subexpr);
+			type = exprType((Node *) ((CacheExpr *) expr)->arg);
 			break;
 		case T_CoerceToDomain:
 			type = ((CoerceToDomain *) expr)->resulttype;
@@ -796,7 +796,7 @@ exprCollation(Node *expr)
 			coll = InvalidOid;	/* result is always boolean */
 			break;
 		case T_CacheExpr:
-			coll = exprCollation((Node *) ((CacheExpr *) expr)->subexpr);
+			coll = exprCollation((Node *) ((CacheExpr *) expr)->arg);
 			break;
 		case T_CoerceToDomain:
 			coll = ((CoerceToDomain *) expr)->resultcollid;
@@ -1275,7 +1275,7 @@ exprLocation(Node *expr)
 			break;
 		case T_CacheExpr:
 			/* original expression location */
-			loc = exprLocation((Node *) ((CacheExpr *) expr)->subexpr);
+			loc = exprLocation((Node *) ((CacheExpr *) expr)->arg);
 			break;
 		case T_CoerceToDomain:
 			{
@@ -1737,7 +1737,7 @@ expression_tree_walker(Node *node,
 		case T_BooleanTest:
 			return walker(((BooleanTest *) node)->arg, context);
 		case T_CacheExpr:
-			return walker(((CacheExpr *) node)->subexpr, context);
+			return walker(((CacheExpr *) node)->arg, context);
 		case T_CoerceToDomain:
 			return walker(((CoerceToDomain *) node)->arg, context);
 		case T_TargetEntry:
@@ -2396,7 +2396,7 @@ expression_tree_mutator(Node *node,
 				CacheExpr *newnode;
 
 				FLATCOPY(newnode, cache, CacheExpr);
-				MUTATE(newnode->subexpr, cache->subexpr, Expr *);
+				MUTATE(newnode->arg, cache->arg, Expr *);
 				return (Node *) newnode;
 			}
 			break;
@@ -2807,7 +2807,7 @@ bool
 		case T_BooleanTest:
 			return walker(((BooleanTest *) node)->arg, context);
 		case T_CacheExpr:
-			return walker(((CacheExpr *) node)->subexpr, context);
+			return walker(((CacheExpr *) node)->arg, context);
 		case T_JoinExpr:
 			{
 				JoinExpr   *join = (JoinExpr *) node;

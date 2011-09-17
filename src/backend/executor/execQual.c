@@ -3786,7 +3786,7 @@ ExecEvalCacheExpr(CacheExprState *cstate,
 	/* Set-returning expressions can't be cached */
 	Assert(isDone == NULL || *isDone == ExprSingleResult);
 
-	resultType = exprType((Node *) ((CacheExpr *) cstate->xprstate.expr)->subexpr);
+	resultType = exprType((Node *) ((CacheExpr *) cstate->xprstate.expr)->arg);
 	get_typlenbyval(resultType, &resultTypLen, &resultTypByVal);
 
 	/* This cached datum has to persist for the whole query */
@@ -4928,7 +4928,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				CacheExprState *cstate = makeNode(CacheExprState);
 
 				cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCacheExpr;
-				cstate->subexpr = ExecInitExpr(cache->subexpr, parent);
+				cstate->subexpr = ExecInitExpr(cache->arg, parent);
 
 				state = (ExprState *) cstate;
 			}

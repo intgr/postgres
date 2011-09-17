@@ -3161,7 +3161,7 @@ eval_const_expressions_mutator(Node *node,
 
 		Assert(context->estimate && !context->cache);
 
-		return eval_const_expressions_mutator((Node *) cache->subexpr, context, cachable);
+		return eval_const_expressions_mutator((Node *) cache->arg, context, cachable);
 	}
 		default:
 			break;

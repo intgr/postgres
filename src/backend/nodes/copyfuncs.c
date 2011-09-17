@@ -1691,7 +1691,7 @@ _copyCacheExpr(CacheExpr *from)
 {
 	CacheExpr *newnode = makeNode(CacheExpr);
 
-	COPY_NODE_FIELD(subexpr);
+	COPY_NODE_FIELD(arg);
 
 	return newnode;
 }

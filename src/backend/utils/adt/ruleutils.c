@@ -5744,10 +5744,10 @@ get_rule_expr(Node *node, deparse_context *context,
 
 #ifdef DEBUG_CACHEEXPR
 				appendStringInfo(buf, "CACHE[");
-				get_rule_expr((Node *) cache->subexpr, context, true);
+				get_rule_expr((Node *) cache->arg, context, true);
 				appendStringInfoChar(buf, ']');
 #else
-				get_rule_expr((Node *) cache->subexpr, context, true);
+				get_rule_expr((Node *) cache->arg, context, true);
 #endif
 			}
 			break;

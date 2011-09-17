@@ -1036,7 +1036,7 @@ typedef struct BooleanTest
 typedef struct CacheExpr
 {
 	Expr		xpr;
-	Expr	   *subexpr;
+	Expr	   *arg;
 } CacheExpr;
 
 /*
