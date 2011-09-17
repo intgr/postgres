@@ -1031,7 +1031,11 @@ typedef struct BooleanTest
 /*
  * CacheExpr
  *
- * XXX
+ * CacheExpr is a constant expression to be cached at execution time. The
+ * eval_const_expressions() function inserts CacheExpr nodes nodes at
+ * strategic locations when it recognizes constant expressions that cannot be
+ * constant-folded at plan time, such as expressions with Param references,
+ * stable function and operator calls, etc
  */
 typedef struct CacheExpr
 {

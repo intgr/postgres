@@ -2038,6 +2038,11 @@ rowtype_field_matches(Oid rowtypeid, int fieldnum,
  * assumption in the presence of user-defined functions; do we need a
  * pg_proc flag that prevents discarding the execution of a function?)
  *
+ * We also insert CacheExpr nodes above expressions that cannot be
+ * evaluated at planning time, but are constant at execution time.
+ * This includes expressions that contain stable function calls and
+ * Param references.
+ *
  * We do understand that certain functions may deliver non-constant
  * results even with constant inputs, "nextval()" being the classic
  * example.  Functions that are not marked "immutable" in pg_proc
@@ -2096,6 +2101,7 @@ eval_const_expressions(PlannerInfo *root, Node *node)
  *	  value of the Param.
  * 2. Fold stable, as well as immutable, functions to constants.
  * 3. Reduce PlaceHolderVar nodes to their contained expressions.
+ * 4. Strip CacheExpr nodes, as planner only wants to evaluate once.
  *--------------------
  */
 Node *
@@ -2651,7 +2657,6 @@ eval_const_expressions_mutator(Node *node,
 	}
 	case T_CollateExpr:
 	{
-		/* XXX cachable? */
 		/*
 		 * If we can simplify the input to a constant, then we don't need the
 		 * CollateExpr node at all: just change the constcollid field of the
@@ -2664,7 +2669,7 @@ eval_const_expressions_mutator(Node *node,
 
 		arg = eval_const_expressions_mutator((Node *) collate->arg,
 											 context,
-											 cachable); /* XXX cachable? */
+											 cachable);
 
 		if (arg && IsA(arg, Const))
 		{
@@ -2736,7 +2741,7 @@ eval_const_expressions_mutator(Node *node,
 		Node	   *defresult = NULL;
 		ListCell   *arg;
 
-		*cachable = false;
+		*cachable = false; /* This is a hard case for cachability */
 
 		/* Simplify the test expression, if any */
 		newarg = caching_const_expressions_mutator((Node *) caseexpr->arg,
@@ -3602,6 +3607,12 @@ simplify_function(Expr *oldexpr, Oid funcid,
 		arg = eval_const_expressions_mutator(arg, context, &isCachable);
 		lfirst(lc) = arg;
 
+		/*
+		 * We're stuck in a catch-22 here. If all arguments and the call
+		 * itself is cachable, we don't want to insert cache nodes for
+		 * arguments. But we don't know that until we walk through all the
+		 * arguments.
+		 */
 		if (isCachable && context->cache)
 			cachable_args = lappend(cachable_args, arg);
 		else
