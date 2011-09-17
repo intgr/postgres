@@ -472,7 +472,7 @@ makeFuncExpr(Oid funcid, Oid rettype, List *args,
 
 /*
  * makeCacheExpr -
- *	build an expression tree for a cachable expression.
+ *	build an expression node for a cachable expression.
  */
 CacheExpr *
 makeCacheExpr(Expr *subexpr)

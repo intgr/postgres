@@ -101,7 +101,7 @@ static Relids find_nonnullable_rels_walker(Node *node, bool top_level);
 static List *find_nonnullable_vars_walker(Node *node, bool top_level);
 static bool is_strict_saop(ScalarArrayOpExpr *expr, bool falseOK);
 static bool set_coercionform_dontcare_walker(Node *node, void *context);
-static Node *caching_const_expressions_mutator(Node* node,
+static Node *caching_const_expressions_mutator(Node *node,
 		   	   	   	   	   	   	  eval_const_expressions_context *context);
 static Node *eval_const_expressions_mutator(Node *node,
 							   eval_const_expressions_context *context,
@@ -2115,7 +2115,10 @@ estimate_expression_value(PlannerInfo *root, Node *node)
 	return eval_const_expressions_mutator(node, &context, &isCachable);
 }
 
-
+/*
+ * Calls eval_const_expressions_mutator on the expression tree and
+ * automatically adds a CacheExpr node if the expression is cachable.
+ */
 static Node *
 caching_const_expressions_mutator(Node *node,
 		   	   	   	   	   	   	  eval_const_expressions_context *context)
@@ -2138,7 +2141,7 @@ eval_const_expressions_mutator(Node *node,
 							   eval_const_expressions_context *context,
 							   bool *cachable)
 {
-	if(context->cache)
+	if (context->cache)
 		Assert(*cachable == true);
 
 	if (node == NULL)
@@ -2300,7 +2303,7 @@ eval_const_expressions_mutator(Node *node,
 		case T_DistinctExpr:
 	{
 		DistinctExpr *expr = (DistinctExpr *) node;
-		List	   *args;
+		List	   *args = expr->args;
 		ListCell   *arg;
 		bool		has_null_input = false;
 		bool		all_null_input = true;
@@ -2308,13 +2311,6 @@ eval_const_expressions_mutator(Node *node,
 		Expr	   *simple;
 		DistinctExpr *newexpr;
 
-		/*
-		 * Reduce constants in the DistinctExpr's arguments.  We know args is
-		 * either NIL or a List node, so we can call expression_tree_mutator
-		 * directly rather than recursing to self.
-		 */
-
-		args = expr->args;
 		/*
 		 * We must do our own check for NULLs because DistinctExpr has
 		 * different results for NULL input than the underlying operator does.
@@ -2526,7 +2522,6 @@ eval_const_expressions_mutator(Node *node,
 		case T_CoerceViaIO:
 	{
 		CoerceViaIO *expr = (CoerceViaIO *) node;
-		//Expr	   *arg;
 		List	   *args;
 		Oid			outfunc;
 		bool		outtypisvarlena;
@@ -2534,7 +2529,7 @@ eval_const_expressions_mutator(Node *node,
 		Oid			intypioparam;
 		Expr	   *simple;
 		CoerceViaIO *newexpr;
-		//bool		isCachable = true;
+		bool		isCachable = true;
 
 		*cachable = false; /* XXX cachable? */
 
@@ -2562,10 +2557,10 @@ eval_const_expressions_mutator(Node *node,
 								   InvalidOid,
 								   &args,
 								   true, context,
-								   cachable);
+								   &isCachable);
 		if (simple)				/* successfully simplified output fn */
 		{
-			bool isCachable = true;
+			isCachable = true;
 			/*
 			 * Input functions may want 1 to 3 arguments.  We always supply
 			 * all three, trusting that nothing downstream will complain.
@@ -2645,7 +2640,7 @@ eval_const_expressions_mutator(Node *node,
 		 */
 		if (context->cache && arg && *cachable &&
 			(OidIsValid(newexpr->elemfuncid) &&
-			 func_volatile(newexpr->elemfuncid) == PROVOLATILE_VOLATILE))
+			func_volatile(newexpr->elemfuncid) == PROVOLATILE_VOLATILE))
 		{
 			*cachable = false;
 			newexpr->arg = insert_cache(arg);
@@ -3158,21 +3153,15 @@ eval_const_expressions_mutator(Node *node,
 		case T_CacheExpr:
 	{
 		/*
-		 * This may be called for an already-simplified expression as part of
-		 * a new, deeper expression, for example due to inlining. Strip cache
-		 * from here and hope that the caller can insert a new CacheExpr in a
-		 * better place. Or if context->cache is false, this CacheExpr must
-		 * be removed anyway.
-		 *
-		 * We know for a fact that the sub-expression is cachable and already
-		 * simplified, so don't bother recursing -- just copy the tree.
-		 *
-		 * XXX Can other code modify the sub-expression in ways that could
-		 * affect cachability or need to be re-simplified?
+		 * The planner asked us to re-simplify a simplified expression tree.
+		 * Strip CacheExpr nodes since the planner only evaluates the
+		 * expression once.
 		 */
 		CacheExpr *cache = (CacheExpr *) node;
 
-		return expression_tree_copy_mutator((Node *) cache->subexpr, NULL);
+		Assert(context->estimate && !context->cache);
+
+		return eval_const_expressions_mutator((Node *) cache->subexpr, context, cachable);
 	}
 		default:
 			break;
@@ -3188,7 +3177,7 @@ eval_const_expressions_mutator(Node *node,
 	 * cannot eliminate an ArrayRef node, but we might be able to simplify
 	 * or cache constant expressions in its subscripts.
 	 */
-	return expression_tree_mutator(node, //eval_const_expressions_mutator,
+	return expression_tree_mutator(node,
 								   caching_const_expressions_mutator,
 								   (void *) context);
 }
@@ -3305,13 +3294,13 @@ simplify_or_arguments(List *args,
 		}
 
 		/* else emit the simplified arg into the result list XXX update comment */
-		if(isCachable)
+		if (isCachable)
 			cachable_args = lappend(cachable_args, arg);
 		else
 			nocache_args = lappend(nocache_args, arg);
 	}
 
-	if(cachable_args && nocache_args)
+	if (cachable_args && nocache_args)
 	{
 		Expr	   *arg;
 
@@ -3330,7 +3319,7 @@ simplify_or_arguments(List *args,
 		*cachable = false;
 		return nocache_args;
 	}
-	else if(nocache_args)
+	else if (nocache_args)
 	{
 		*cachable = false;
 		return nocache_args;
@@ -3442,13 +3431,13 @@ simplify_and_arguments(List *args,
 		}
 
 		/* else emit the simplified arg into the result list */
-		if(isCachable)
+		if (isCachable)
 			cachable_args = lappend(cachable_args, arg);
 		else
 			nocache_args = lappend(nocache_args, arg);
 	}
 
-	if(cachable_args && nocache_args)
+	if (cachable_args && nocache_args)
 	{
 		Expr	   *arg;
 
@@ -3467,7 +3456,7 @@ simplify_and_arguments(List *args,
 		*cachable = false;
 		return nocache_args;
 	}
-	else if(nocache_args)
+	else if (nocache_args)
 	{
 		*cachable = false;
 		return nocache_args;
@@ -3594,7 +3583,7 @@ simplify_function(Expr *oldexpr, Oid funcid,
 	if (!HeapTupleIsValid(func_tuple))
 		elog(ERROR, "cache lookup failed for function %u", funcid);
 
-	if(oldexpr && IsA(oldexpr, FuncExpr))
+	if (oldexpr && IsA(oldexpr, FuncExpr))
 		/*
 		 * Reorder named arguments and add defaults if needed. Returns a
 		 * copied list, so we can mutate it later.
@@ -3702,11 +3691,12 @@ simplify_function(Expr *oldexpr, Oid funcid,
 }
 
 /*
- * This function converts a named-notation argument list into positional
- * notation while adding any needed default argument expressions
+ * This function prepares a function's argument list -- converting
+ * named-notation argument list into positional notation while adding any
+ * needed default argument expressions.
  *
- * This function always returns a copy of the argument list, the original
- * list is not modified.
+ * Always returns a copy of the argument list, the original list is not
+ * modified.
  */
 static List *
 simplify_copy_function_arguments(List *old_args, Oid result_type,
@@ -3715,7 +3705,7 @@ simplify_copy_function_arguments(List *old_args, Oid result_type,
 	List	   *args = NIL;
 	ListCell   *lc;
 	bool		has_named_args = false;
-	int			args_before;
+	int			nargs_before;
 
 	/* Do we need to reorder named arguments? */
 	foreach(lc, old_args)
@@ -3729,7 +3719,7 @@ simplify_copy_function_arguments(List *old_args, Oid result_type,
 		}
 	}
 
-	args_before = list_length(old_args);
+	nargs_before = list_length(old_args);
 
 	/*
 	 * Reorder named arguments and add default arguments if needed.
@@ -3746,7 +3736,7 @@ simplify_copy_function_arguments(List *old_args, Oid result_type,
 			args = add_function_defaults(args, result_type, func_tuple);
 	}
 
-	if (list_length(args) != args_before)
+	if (list_length(args) != nargs_before)
 		/* Added defaults may need casts */
 		recheck_cast_function_args(args, result_type, func_tuple);
 
@@ -3975,7 +3965,7 @@ evaluate_function(Oid funcid, Oid result_type, int32 result_typmod,
 		return NULL;
 	}
 
-	if(funcform->provolatile == PROVOLATILE_VOLATILE)
+	if (funcform->provolatile == PROVOLATILE_VOLATILE)
 		*cachable = false;
 
 	/*
@@ -4074,7 +4064,7 @@ inline_function(Oid funcid, Oid result_type, Oid result_collid,
 				Oid input_collid, List *args,
 				HeapTuple func_tuple,
 				eval_const_expressions_context *context,
-				bool* cachable)
+				bool *cachable)
 {
 	Form_pg_proc funcform = (Form_pg_proc) GETSTRUCT(func_tuple);
 	char	   *src;

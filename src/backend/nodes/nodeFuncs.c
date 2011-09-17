@@ -993,7 +993,6 @@ exprSetCollation(Node *expr, Oid collation)
 		case T_BooleanTest:
 			Assert(!OidIsValid(collation));		/* result is always boolean */
 			break;
-		/* XXX CacheExpr should never need collation, right? right? */
 		case T_CoerceToDomain:
 			((CoerceToDomain *) expr)->resultcollid = collation;
 			break;
@@ -1005,6 +1004,10 @@ exprSetCollation(Node *expr, Oid collation)
 			break;
 		case T_CurrentOfExpr:
 			Assert(!OidIsValid(collation));		/* result is always boolean */
+			break;
+		case T_CacheExpr:
+			/* I think this should never occur, but leave this here just in case */
+			elog(ERROR, "Can't set collation on CacheExpr");
 			break;
 		default:
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(expr));
@@ -1934,6 +1937,7 @@ range_table_walker(List *rtable,
 	return false;
 }
 
+
 /*
  * expression_tree_mutator() is designed to support routines that make a
  * modified copy of an expression tree, with some nodes being added,
@@ -2542,17 +2546,6 @@ expression_tree_mutator(Node *node,
 	}
 	/* can't get here, but keep compiler happy */
 	return NULL;
-}
-
-/*
- * A small decorator over expression_tree_mutator to just return a deep copy
- * of the whole expression tree.
- */
-Node *
-expression_tree_copy_mutator(Node *node,
-							 void *context)
-{
-	return expression_tree_mutator(node, expression_tree_copy_mutator, NULL);
 }
 
 /*

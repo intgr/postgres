@@ -3789,7 +3789,7 @@ ExecEvalCacheExpr(CacheExprState *cstate,
 	resultType = exprType((Node *) ((CacheExpr *) cstate->xprstate.expr)->subexpr);
 	get_typlenbyval(resultType, &resultTypLen, &resultTypByVal);
 
-	/* This cache has to persist for the whole query */
+	/* This cached datum has to persist for the whole query */
 	oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
 	cstate->result = datumCopy(result, resultTypByVal, resultTypLen);
 	cstate->isNull = *isNull;
@@ -3812,7 +3812,7 @@ ExecEvalCacheExprResult(CacheExprState *cstate,
 						bool *isNull,
 						ExprDoneCond *isDone)
 {
-	if(isDone)
+	if (isDone)
 		*isDone = ExprSingleResult;
 	*isNull = cstate->isNull;
 	return cstate->result;
