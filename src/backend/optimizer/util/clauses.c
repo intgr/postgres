@@ -143,6 +143,7 @@ static Node *substitute_actual_parameters(Node *expr, int nargs, List *args,
 static Node *substitute_actual_parameters_mutator(Node *node,
 							  substitute_actual_parameters_context *context);
 static void sql_inline_error_callback(void *arg);
+static bool is_cache_useful(Expr *expr);
 static Expr *insert_cache(Expr *expr);
 static Expr *evaluate_expr(Expr *expr, Oid result_type, int32 result_typmod,
 			  Oid result_collation);
@@ -3612,9 +3613,18 @@ simplify_function(Expr *oldexpr, Oid funcid,
 		 * itself is cachable, we don't want to insert cache nodes for
 		 * arguments. But we don't know that until we walk through all the
 		 * arguments.
+		 *
+		 * So we accumulate cachable arguments in a list of ListCell pointers,
+		 * which we will update later if necessary.
+		 *
+		 * Note: The args list may not be mutated from here on this until we
+		 * handle cachable_args below.
 		 */
-		if (isCachable && context->cache)
-			cachable_args = lappend(cachable_args, arg);
+		if (isCachable)
+		{
+			if(context->cache && is_cache_useful((Expr *) arg))
+				cachable_args = lappend(cachable_args, &lfirst(lc));
+		}
 		else
 			*cachable = false;	/* One bad arg spoils the whole cache */
 	}
@@ -3681,17 +3691,14 @@ simplify_function(Expr *oldexpr, Oid funcid,
 	ReleaseSysCache(func_tuple);
 
 	/*
-	 * If function call can't be cached/inlined, cache all cachable arguments
+	 * If function call can't be cached/inlined, update all cachable arguments
 	 */
-	if (!newexpr && !(*cachable) && cachable_args != NIL)
+	if (!newexpr && !(*cachable))
 	{
-		foreach(lc, args)
+		foreach(lc, cachable_args)
 		{
-			Node	   *arg = (Node *) lfirst(lc);
-
-			/* XXX ugly as hell and N^2 to the number of arguments */
-			if (list_member(cachable_args, arg))
-				lfirst(lc) = insert_cache((Expr *) arg);
+			Node	  **arg = (Node **) lfirst(lc);
+			*arg = (Node *) makeCacheExpr((Expr *) *arg);
 		}
 	}
 
@@ -4434,16 +4441,26 @@ sql_inline_error_callback(void *arg)
 }
 
 /*
- * XXX
+ * Is it useful to cache this expression? Constants and param references are
+ * always fast to access so don't insert cache in front of those.
  */
+static bool
+is_cache_useful(Expr *expr)
+{
+	if (IsA(expr, Const))
+		return false;
+	if (IsA(expr, Param))
+		return false;
+	return true;
+}
+
 static Expr *
 insert_cache(Expr *expr)
 {
 	/* Don't cache obviously cheap expressions */
-	if (IsA(expr, Const))
+	if(!is_cache_useful(expr))
 		return expr;
-	if (IsA(expr, Param))
-		return expr;
+
 	Assert(!IsA(expr, CacheExpr));
 
 	return (Expr *) makeCacheExpr(expr);
