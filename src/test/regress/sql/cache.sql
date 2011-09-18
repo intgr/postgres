@@ -14,6 +14,7 @@ $$begin raise notice 'STABLE FALSE'; return false; end;$$;
 create function volatile_false() returns bool VOLATILE language plpgsql as
 $$begin raise notice 'VOLATILE FALSE'; return false; end;$$;
 
+-- Table with two rows
 create table two (i int);
 insert into two values (1), (2);
 
@@ -87,4 +88,15 @@ select volatile_true() =%= volatile_false() from two;
 select stable_true() =%= volatile_false() from two;
 select stable_true() =%= stable_false() from two;
 
+-- Coalesce
+create function stable_null() returns bool STABLE language plpgsql as
+$$begin raise notice 'STABLE NULL'; return null; end;$$;
+create function volatile_null() returns bool VOLATILE language plpgsql as
+$$begin raise notice 'VOLATILE NULL'; return null; end;$$;
+
+select coalesce(stable_null(), stable_true()) from two;
+select coalesce(stable_true(), volatile_null()) from two;
+select coalesce(volatile_null(), stable_null(), volatile_true()) from two;
+
+-- The end
 drop table two;

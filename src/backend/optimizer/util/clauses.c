@@ -2893,17 +2893,18 @@ eval_const_expressions_mutator(Node *node,
 		CoalesceExpr *coalesceexpr = (CoalesceExpr *) node;
 		CoalesceExpr *newcoalesce;
 		List	   *newargs;
-		ListCell   *arg;
-
-		*cachable = false; /* XXX cachable? */
+		List	   *cachable_args = NIL;
+		ListCell   *lc;
 
 		newargs = NIL;
-		foreach(arg, coalesceexpr->args)
+		foreach(lc, coalesceexpr->args)
 		{
-			Node	   *e;
+			Node	   *arg = lfirst(lc);
+			bool		isCachable = true;
 
-			e = caching_const_expressions_mutator((Node *) lfirst(arg),
-												  context);
+			arg = eval_const_expressions_mutator((Node *) arg,
+											   context,
+											   &isCachable);
 
 			/*
 			 * We can remove null constants from the list. For a non-null
@@ -2912,16 +2913,25 @@ eval_const_expressions_mutator(Node *node,
 			 * it's the next argument, but we can drop following arguments
 			 * since they will never be reached.
 			 */
-			if (IsA(e, Const))
+			if (IsA(arg, Const))
 			{
-				if (((Const *) e)->constisnull)
+				if (((Const *) arg)->constisnull)
 					continue;	/* drop null constant */
 				if (newargs == NIL)
-					return e;	/* first expr */
-				newargs = lappend(newargs, e);
+					return arg;	/* first expr */
+				newargs = lappend(newargs, arg);
 				break;
 			}
-			newargs = lappend(newargs, e);
+
+			newargs = lappend(newargs, arg);
+
+			if (isCachable)
+			{
+				if (context->cache && is_cache_useful((Expr *) arg))
+					cachable_args = lappend(cachable_args, &llast(newargs));
+			}
+			else
+				*cachable = false;
 		}
 
 		/* If all the arguments were constant null, the result is just null */
@@ -2929,6 +2939,14 @@ eval_const_expressions_mutator(Node *node,
 			return (Node *) makeNullConst(coalesceexpr->coalescetype,
 										  -1,
 										  coalesceexpr->coalescecollid);
+		if(!(*cachable))
+		{
+			foreach(lc, cachable_args)
+			{
+				Expr	  **arg = (Expr **) lfirst(lc);
+				*arg = (Expr *) makeCacheExpr(*arg);
+			}
+		}
 
 		newcoalesce = makeNode(CoalesceExpr);
 		newcoalesce->coalescetype = coalesceexpr->coalescetype;

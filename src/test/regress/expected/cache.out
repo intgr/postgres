@@ -12,6 +12,7 @@ create function stable_false() returns bool STABLE language plpgsql as
 $$begin raise notice 'STABLE FALSE'; return false; end;$$;
 create function volatile_false() returns bool VOLATILE language plpgsql as
 $$begin raise notice 'VOLATILE FALSE'; return false; end;$$;
+-- Table with two rows
 create table two (i int);
 insert into two values (1), (2);
 -- Boolean expressions
@@ -408,4 +409,39 @@ NOTICE:  VOLATILE t =%= f
  f
 (2 rows)
 
+-- Coalesce
+create function stable_null() returns bool STABLE language plpgsql as
+$$begin raise notice 'STABLE NULL'; return null; end;$$;
+create function volatile_null() returns bool VOLATILE language plpgsql as
+$$begin raise notice 'VOLATILE NULL'; return null; end;$$;
+select coalesce(stable_null(), stable_true()) from two;
+NOTICE:  STABLE NULL
+NOTICE:  STABLE TRUE
+ coalesce 
+----------
+ t
+ t
+(2 rows)
+
+select coalesce(stable_true(), volatile_null()) from two;
+NOTICE:  STABLE TRUE
+ coalesce 
+----------
+ t
+ t
+(2 rows)
+
+select coalesce(volatile_null(), stable_null(), volatile_true()) from two;
+NOTICE:  VOLATILE NULL
+NOTICE:  STABLE NULL
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE NULL
+NOTICE:  VOLATILE TRUE
+ coalesce 
+----------
+ t
+ t
+(2 rows)
+
+-- The end
 drop table two;
