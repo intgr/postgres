@@ -132,5 +132,14 @@ $$begin raise notice 'STABLE ROW'; a = 1; b = 2; end;$$;
 
 select (stable_row()).a from two;
 
+-- INSERT column default expressions
+create table defaults (
+	dummy int,
+	a bool default stable_true(),
+	b bool default volatile_true()
+);
+insert into defaults (dummy) values(0), (1);
+
 -- The end
+drop table defaults;
 drop table two;

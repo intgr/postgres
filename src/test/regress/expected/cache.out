@@ -604,5 +604,16 @@ NOTICE:  STABLE ROW
  1
 (2 rows)
 
+-- INSERT column default expressions
+create table defaults (
+	dummy int,
+	a bool default stable_true(),
+	b bool default volatile_true()
+);
+insert into defaults (dummy) values(0), (1);
+NOTICE:  STABLE TRUE
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE TRUE
 -- The end
+drop table defaults;
 drop table two;
