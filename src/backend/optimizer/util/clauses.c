@@ -2738,11 +2738,10 @@ eval_const_expressions_mutator(Node *node,
 		Node	   *save_case_val;
 		Node	   *newarg;
 		List	   *newargs;
+		List	   *cachable_args = NIL;
 		bool		const_true_cond;
 		Node	   *defresult = NULL;
 		ListCell   *arg;
-
-		*cachable = false; /* This is a hard case for cachability */
 
 		/* Simplify the test expression, if any */
 		newarg = caching_const_expressions_mutator((Node *) caseexpr->arg,
@@ -2766,13 +2765,15 @@ eval_const_expressions_mutator(Node *node,
 			CaseWhen   *oldcasewhen = (CaseWhen *) lfirst(arg);
 			Node	   *casecond;
 			Node	   *caseresult;
+			bool		condCachable = true;
+			bool		resultCachable = true;
 
 			Assert(IsA(oldcasewhen, CaseWhen));
 
 			/* Simplify this alternative's test condition */
 			casecond =
-				caching_const_expressions_mutator((Node *) oldcasewhen->expr,
-												  context);
+				eval_const_expressions_mutator((Node *) oldcasewhen->expr,
+											   context, &condCachable);
 
 			/*
 			 * If the test condition is constant FALSE (or NULL), then drop
@@ -2791,8 +2792,8 @@ eval_const_expressions_mutator(Node *node,
 
 			/* Simplify this alternative's result value */
 			caseresult =
-				caching_const_expressions_mutator((Node *) oldcasewhen->result,
-											   context);
+				eval_const_expressions_mutator((Node *) oldcasewhen->result,
+											   context, &resultCachable);
 
 			/* If non-constant test condition, emit a new WHEN node */
 			if (!const_true_cond)
@@ -2803,6 +2804,23 @@ eval_const_expressions_mutator(Node *node,
 				newcasewhen->result = (Expr *) caseresult;
 				newcasewhen->location = oldcasewhen->location;
 				newargs = lappend(newargs, newcasewhen);
+
+				if (condCachable)
+				{
+					if (context->cache && is_cache_useful((Expr *) casecond))
+						cachable_args = lappend(cachable_args, &newcasewhen->expr);
+				}
+				else
+					*cachable = false;
+
+				if (resultCachable)
+				{
+					if (context->cache && is_cache_useful((Expr *) caseresult))
+						cachable_args = lappend(cachable_args, &newcasewhen->result);
+				}
+				else
+					*cachable = false;
+
 				continue;
 			}
 
@@ -2816,15 +2834,39 @@ eval_const_expressions_mutator(Node *node,
 
 		/* Simplify the default result, unless we replaced it above */
 		if (!const_true_cond)
+		{
+			bool		isCachable = true;
+
 			defresult =
-				caching_const_expressions_mutator((Node *) caseexpr->defresult,
-											   context);
+				eval_const_expressions_mutator((Node *) caseexpr->defresult,
+											   context, &isCachable);
+
+			if (isCachable)
+			{
+				if (context->cache && is_cache_useful((Expr *) defresult))
+					cachable_args = lappend(cachable_args, &defresult);
+			}
+			else
+				*cachable = false;
+		}
 
 		context->case_val = save_case_val;
 
 		/* If no non-FALSE alternatives, CASE reduces to the default result */
 		if (newargs == NIL)
 			return defresult;
+
+		if(!(*cachable))
+		{
+			ListCell   *lc;
+
+			foreach(lc, cachable_args)
+			{
+				Expr	  **arg = (Expr **) lfirst(lc);
+				*arg = (Expr *) makeCacheExpr(*arg);
+			}
+		}
+
 		/* Otherwise we need a new CASE node */
 		newcase = makeNode(CaseExpr);
 		newcase->casetype = caseexpr->casetype;

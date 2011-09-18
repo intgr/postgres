@@ -98,5 +98,13 @@ select coalesce(stable_null(), stable_true()) from two;
 select coalesce(stable_true(), volatile_null()) from two;
 select coalesce(volatile_null(), stable_null(), volatile_true()) from two;
 
+-- Case/when
+select case when stable_true() then 't' else volatile_false() end as b from two;
+select case when volatile_true() then stable_true() else stable_false() end as b from two;
+select case when i=1 then stable_true() else stable_false() end as b from two;
+select case when i=1 then volatile_true() else volatile_false() end as b from two;
+
+select case when 't' then 't' else volatile_false() end == true as b from two;
+
 -- The end
 drop table two;

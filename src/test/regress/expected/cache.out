@@ -443,5 +443,50 @@ NOTICE:  VOLATILE TRUE
  t
 (2 rows)
 
+-- Case/when
+select case when stable_true() then 't' else volatile_false() end as b from two;
+NOTICE:  STABLE TRUE
+ b 
+---
+ t
+ t
+(2 rows)
+
+select case when volatile_true() then stable_true() else stable_false() end as b from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE TRUE
+NOTICE:  VOLATILE TRUE
+ b 
+---
+ t
+ t
+(2 rows)
+
+select case when i=1 then stable_true() else stable_false() end as b from two;
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE FALSE
+ b 
+---
+ t
+ f
+(2 rows)
+
+select case when i=1 then volatile_true() else volatile_false() end as b from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE FALSE
+ b 
+---
+ t
+ f
+(2 rows)
+
+select case when 't' then 't' else volatile_false() end == true as b from two;
+NOTICE:  STABLE t == t
+ b 
+---
+ t
+ t
+(2 rows)
+
 -- The end
 drop table two;
