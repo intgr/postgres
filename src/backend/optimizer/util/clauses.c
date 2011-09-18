@@ -2229,7 +2229,7 @@ eval_const_expressions_mutator(Node *node,
 								   expr->inputcollid,
 								   &args,
 								   true, context,
-								   cachable); /* XXX untested */
+								   cachable);
 		if (simple)				/* successfully simplified it */
 			return (Node *) simple;
 
@@ -2320,7 +2320,13 @@ eval_const_expressions_mutator(Node *node,
 		bool		leftCachable = true;
 		bool		rightCachable = true;
 
-		/* Reduce constants in the DistinctExpr's arguments */
+		/*
+		 * Reduce constants in the DistinctExpr's arguments
+		 *
+		 * Note that simplify_function() might calls the mutator function on
+		 * arguments for a second time. However, this is harmless because
+		 * it's only called when arguments are constant.
+		 */
 		Assert(list_length(args) == 2);
 
 		linitial(args) = eval_const_expressions_mutator(linitial(args),
@@ -3035,15 +3041,17 @@ eval_const_expressions_mutator(Node *node,
 		 * We must however check that the declared type of the field is still
 		 * the same as when the FieldSelect was created --- this can change if
 		 * someone did ALTER COLUMN TYPE on the rowtype.
+		 *
+		 * This is never cachable because Var references aren't constants.
+		 * simplify_function() also refuses caching of row-returning functions
 		 */
 		FieldSelect *fselect = (FieldSelect *) node;
 		FieldSelect *newfselect;
 		Node	   *arg;
 
-		*cachable = false; /* XXX cachable? */
-
-		arg = caching_const_expressions_mutator((Node *) fselect->arg,
-												context);
+		arg = eval_const_expressions_mutator((Node *) fselect->arg,
+											 context,
+											 cachable);
 		if (arg && IsA(arg, Var) &&
 			((Var *) arg)->varattno == InvalidAttrNumber)
 		{
@@ -4060,8 +4068,6 @@ evaluate_function(Oid funcid, Oid result_type, int32 result_typmod,
 	 * the case of a NULL function result there doesn't seem to be any clean
 	 * way to fix that.  In view of the likelihood of there being still other
 	 * gotchas, seems best to leave the function call unreduced.
-	 *
-	 * XXX does the above apply to "cachable" too?
 	 */
 	if (funcform->prorettype == RECORDOID)
 	{

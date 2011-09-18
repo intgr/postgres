@@ -153,6 +153,7 @@ NOTICE:  VOLATILE TRUE
  f
 (2 rows)
 
+-- Bind params
 prepare param_test(bool) as select $1 or stable_false() or volatile_true() as b from two;
 execute param_test(true);
  b 
@@ -547,6 +548,60 @@ NOTICE:  VOLATILE TRUE
 ---
  t
  t
+(2 rows)
+
+-- IS NULL
+select volatile_true() is null == false as b from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE f == f
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE f == f
+ b 
+---
+ t
+ t
+(2 rows)
+
+select stable_null() is not null == true as b from two;
+NOTICE:  STABLE NULL
+NOTICE:  STABLE f == t
+ b 
+---
+ f
+ f
+(2 rows)
+
+-- Boolean tests
+select volatile_false() is true == true as b from two;
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE f == t
+NOTICE:  VOLATILE FALSE
+NOTICE:  STABLE f == t
+ b 
+---
+ f
+ f
+(2 rows)
+
+select stable_null() is not unknown == false as b from two;
+NOTICE:  STABLE NULL
+NOTICE:  STABLE f == f
+ b 
+---
+ t
+ t
+(2 rows)
+
+-- Field select -- not currently cached
+create function stable_row(a out int, b out int) STABLE language plpgsql as
+$$begin raise notice 'STABLE ROW'; a = 1; b = 2; end;$$;
+select (stable_row()).a from two;
+NOTICE:  STABLE ROW
+NOTICE:  STABLE ROW
+ a 
+---
+ 1
+ 1
 (2 rows)
 
 -- The end

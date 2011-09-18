@@ -36,6 +36,7 @@ select volatile_false() and volatile_true() and stable_true() as b from two;
 select not stable_true() as b from two;
 select not volatile_true() as b from two;
 
+-- Bind params
 prepare param_test(bool) as select $1 or stable_false() or volatile_true() as b from two;
 execute param_test(true);
 execute param_test(false);
@@ -116,6 +117,20 @@ select volatile_true()::text::bool == true as b from two;
 select (stable_true() is not distinct from volatile_false()) as b from two;
 select (stable_true() is distinct from stable_false()) == false as b from two;
 select (volatile_true() is distinct from null) as b from two;
+
+-- IS NULL
+select volatile_true() is null == false as b from two;
+select stable_null() is not null == true as b from two;
+
+-- Boolean tests
+select volatile_false() is true == true as b from two;
+select stable_null() is not unknown == false as b from two;
+
+-- Field select -- not currently cached
+create function stable_row(a out int, b out int) STABLE language plpgsql as
+$$begin raise notice 'STABLE ROW'; a = 1; b = 2; end;$$;
+
+select (stable_row()).a from two;
 
 -- The end
 drop table two;
