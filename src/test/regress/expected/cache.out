@@ -409,6 +409,16 @@ NOTICE:  VOLATILE t =%= f
  f
 (2 rows)
 
+select (volatile_true() or stable_true()) == true as b from two;
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE t == t
+NOTICE:  STABLE t == t
+ b 
+---
+ t
+ t
+(2 rows)
+
 -- Coalesce
 create function stable_null() returns bool STABLE language plpgsql as
 $$begin raise notice 'STABLE NULL'; return null; end;$$;
@@ -481,6 +491,27 @@ NOTICE:  VOLATILE FALSE
 (2 rows)
 
 select case when 't' then 't' else volatile_false() end == true as b from two;
+NOTICE:  STABLE t == t
+ b 
+---
+ t
+ t
+(2 rows)
+
+-- Coerce via I/O
+select stable_true()::text::bool == true as b from two;
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE t == t
+ b 
+---
+ t
+ t
+(2 rows)
+
+select volatile_true()::text::bool == true as b from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  STABLE t == t
+NOTICE:  VOLATILE TRUE
 NOTICE:  STABLE t == t
  b 
 ---

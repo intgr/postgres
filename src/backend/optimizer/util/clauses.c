@@ -2536,9 +2536,6 @@ eval_const_expressions_mutator(Node *node,
 		Oid			intypioparam;
 		Expr	   *simple;
 		CoerceViaIO *newexpr;
-		bool		isCachable = true;
-
-		*cachable = false; /* XXX cachable? */
 
 		/*
 		 * Reduce constants in the CoerceViaIO's argument.
@@ -2564,10 +2561,9 @@ eval_const_expressions_mutator(Node *node,
 								   InvalidOid,
 								   &args,
 								   true, context,
-								   &isCachable);
+								   cachable);
 		if (simple)				/* successfully simplified output fn */
 		{
-			isCachable = true;
 			/*
 			 * Input functions may want 1 to 3 arguments.  We always supply
 			 * all three, trusting that nothing downstream will complain.
@@ -2587,7 +2583,7 @@ eval_const_expressions_mutator(Node *node,
 									   InvalidOid,
 									   &args,
 									   true, context,
-									   &isCachable);
+									   cachable);
 			if (simple)			/* successfully simplified input fn */
 				return (Node *) simple;
 		}

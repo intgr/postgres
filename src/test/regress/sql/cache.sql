@@ -88,6 +88,8 @@ select volatile_true() =%= volatile_false() from two;
 select stable_true() =%= volatile_false() from two;
 select stable_true() =%= stable_false() from two;
 
+select (volatile_true() or stable_true()) == true as b from two;
+
 -- Coalesce
 create function stable_null() returns bool STABLE language plpgsql as
 $$begin raise notice 'STABLE NULL'; return null; end;$$;
@@ -105,6 +107,10 @@ select case when i=1 then stable_true() else stable_false() end as b from two;
 select case when i=1 then volatile_true() else volatile_false() end as b from two;
 
 select case when 't' then 't' else volatile_false() end == true as b from two;
+
+-- Coerce via I/O
+select stable_true()::text::bool == true as b from two;
+select volatile_true()::text::bool == true as b from two;
 
 -- The end
 drop table two;
