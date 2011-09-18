@@ -2310,8 +2310,9 @@ eval_const_expressions_mutator(Node *node,
 		case T_DistinctExpr:
 	{
 		DistinctExpr *expr = (DistinctExpr *) node;
-		List	   *args = expr->args;
-		ListCell   *arg;
+		List	   *args = NIL;
+		ListCell   *lc;
+		Node	   *arg;
 		bool		has_null_input = false;
 		bool		all_null_input = true;
 		bool		has_nonconst_input = false;
@@ -2323,29 +2324,33 @@ eval_const_expressions_mutator(Node *node,
 		/*
 		 * Reduce constants in the DistinctExpr's arguments
 		 *
-		 * Note that simplify_function() might calls the mutator function on
+		 * Note that simplify_function() might call the mutator function on
 		 * arguments for a second time. However, this is harmless because
 		 * it's only called when arguments are constant.
 		 */
-		Assert(list_length(args) == 2);
+		Assert(list_length(expr->args) == 2);
 
-		linitial(args) = eval_const_expressions_mutator(linitial(args),
-														context,
-														&leftCachable);
-		lsecond(args) = eval_const_expressions_mutator(lsecond(args),
-													   context,
-													   &rightCachable);
+		arg = eval_const_expressions_mutator(linitial(expr->args),
+											 context,
+											 &leftCachable);
+		args = lappend(args, arg);
+
+		arg = eval_const_expressions_mutator(lsecond(expr->args),
+											 context,
+											 &rightCachable);
+		args = lappend(args, arg);
 
 		/*
 		 * We must do our own check for NULLs because DistinctExpr has
 		 * different results for NULL input than the underlying operator does.
 		 */
-		foreach(arg, args)
+		foreach(lc, args)
 		{
-			if (IsA(lfirst(arg), Const))
+			arg = lfirst(lc);
+			if (IsA(arg, Const))
 			{
-				has_null_input |= ((Const *) lfirst(arg))->constisnull;
-				all_null_input &= ((Const *) lfirst(arg))->constisnull;
+				has_null_input |= ((Const *) arg)->constisnull;
+				all_null_input &= ((Const *) arg)->constisnull;
 			}
 			else
 				has_nonconst_input = true;
@@ -2404,6 +2409,10 @@ eval_const_expressions_mutator(Node *node,
 		}
 		else
 		{
+			/*
+			 * This expression is only cachable if the equality operator is
+			 * not volatile.
+			 */
 			HeapTuple func_tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(expr->opfuncid));
 			Form_pg_proc funcform = (Form_pg_proc) GETSTRUCT(func_tuple);
 
