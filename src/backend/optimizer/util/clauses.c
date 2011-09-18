@@ -2317,6 +2317,18 @@ eval_const_expressions_mutator(Node *node,
 		bool		has_nonconst_input = false;
 		Expr	   *simple;
 		DistinctExpr *newexpr;
+		bool		leftCachable = true;
+		bool		rightCachable = true;
+
+		/* Reduce constants in the DistinctExpr's arguments */
+		Assert(list_length(args) == 2);
+
+		linitial(args) = eval_const_expressions_mutator(linitial(args),
+														context,
+														&leftCachable);
+		lsecond(args) = eval_const_expressions_mutator(lsecond(args),
+													   context,
+													   &rightCachable);
 
 		/*
 		 * We must do our own check for NULLs because DistinctExpr has
@@ -2366,8 +2378,6 @@ eval_const_expressions_mutator(Node *node,
 									   false, context,
 									   cachable);
 
-			*cachable = false; /* XXX cachable? */
-
 			if (simple)			/* successfully simplified it */
 			{
 				/*
@@ -2382,8 +2392,28 @@ eval_const_expressions_mutator(Node *node,
 				return (Node *) csimple;
 			}
 		}
+		else if (!leftCachable || !rightCachable)
+		{
+			*cachable = false;
+		}
 		else
-			*cachable = false; /* XXX cachable? */
+		{
+			HeapTuple func_tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(expr->opfuncid));
+			Form_pg_proc funcform = (Form_pg_proc) GETSTRUCT(func_tuple);
+
+			if (funcform->provolatile == PROVOLATILE_VOLATILE)
+				*cachable = false;
+
+			ReleaseSysCache(func_tuple);
+		}
+
+		if (!(*cachable))
+		{
+			if(leftCachable)
+				linitial(args) = insert_cache((Expr *) linitial(args));
+			if(rightCachable)
+				lsecond(args) = insert_cache((Expr *) lsecond(args));
+		}
 
 		/*
 		 * The expression cannot be simplified any further, so build and

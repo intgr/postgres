@@ -519,5 +519,35 @@ NOTICE:  STABLE t == t
  t
 (2 rows)
 
+-- IS DISTINCT FROM
+select (stable_true() is not distinct from volatile_false()) as b from two;
+NOTICE:  STABLE TRUE
+NOTICE:  VOLATILE FALSE
+NOTICE:  VOLATILE FALSE
+ b 
+---
+ f
+ f
+(2 rows)
+
+select (stable_true() is distinct from stable_false()) == false as b from two;
+NOTICE:  STABLE TRUE
+NOTICE:  STABLE FALSE
+NOTICE:  STABLE t == f
+ b 
+---
+ f
+ f
+(2 rows)
+
+select (volatile_true() is distinct from null) as b from two;
+NOTICE:  VOLATILE TRUE
+NOTICE:  VOLATILE TRUE
+ b 
+---
+ t
+ t
+(2 rows)
+
 -- The end
 drop table two;

@@ -112,5 +112,10 @@ select case when 't' then 't' else volatile_false() end == true as b from two;
 select stable_true()::text::bool == true as b from two;
 select volatile_true()::text::bool == true as b from two;
 
+-- IS DISTINCT FROM
+select (stable_true() is not distinct from volatile_false()) as b from two;
+select (stable_true() is distinct from stable_false()) == false as b from two;
+select (volatile_true() is distinct from null) as b from two;
+
 -- The end
 drop table two;
