@@ -164,6 +164,26 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 	glob->lastRowMarkId = 0;
 	glob->transientPlan = false;
 
+	/*
+	 * glob->isSimple is a hint to eval_const_expressions() and PL/pgSQL that
+	 * this statement is potentially a simple expression -- it contains no
+	 * table references, no subqueries and no joins clauses.
+	 *
+	 * We need this here because this prevents insertion of CacheExpr, which
+	 * would break simple expressions in PL/pgSQL. Such queries wouldn't
+	 * benefit from constant caching anyway.
+	 *
+	 * The actual definition of a simple statement is more strict, but we
+	 * don't want to spend that checking overhead here.
+	 *
+	 * Caveat: Queries with set-returning functions in SELECT list could
+	 * still potentially benefit from caching, but we don't check that now.
+	 */
+	glob->isSimple = (parse->commandType == CMD_SELECT &&
+					  parse->jointree->fromlist == NIL &&
+					  parse->hasSubLinks == FALSE &&
+					  parse->cteList == NIL);
+
 	/* Determine what fraction of the plan is likely to be scanned */
 	if (cursorOptions & CURSOR_OPT_FAST_PLAN)
 	{
@@ -240,6 +260,7 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 	result->relationOids = glob->relationOids;
 	result->invalItems = glob->invalItems;
 	result->nParamExec = list_length(glob->paramlist);
+	result->isSimple = glob->isSimple;
 
 	return result;
 }

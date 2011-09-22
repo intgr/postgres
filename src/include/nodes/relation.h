@@ -98,6 +98,8 @@ typedef struct PlannerGlobal
 	Index		lastRowMarkId;	/* highest PlanRowMark ID assigned */
 
 	bool		transientPlan;	/* redo plan when TransactionXmin changes? */
+
+	bool		isSimple;		/* possibly simple expression: no CacheExpr */
 } PlannerGlobal;
 
 /* macro for fetching the Plan associated with a SubPlan node */

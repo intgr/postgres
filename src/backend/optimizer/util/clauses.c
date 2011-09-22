@@ -2082,7 +2082,8 @@ eval_const_expressions(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = false;	/* safe transformations only */
-	context.cache = enable_cacheexpr;	/* XXX this should be passed in here as argument? */
+	context.cache = enable_cacheexpr &&
+					(root == NULL || !root->glob->isSimple);
 
 	return caching_const_expressions_mutator(node, &context);
 }

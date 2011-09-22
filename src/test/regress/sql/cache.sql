@@ -140,6 +140,21 @@ create table defaults (
 );
 insert into defaults (dummy) values(0), (1);
 
+-- Make sure we don't cache PL/pgSQL simple expressions -- these expressions
+-- are only prepared once per transaction and then executed multiple times
+
+create function stable_max() returns int STABLE language plpgsql as
+$$begin return (select max(i) from two); end;$$;
+
+create function simple() returns int STABLE language plpgsql as
+$$begin return stable_max(); end;$$;
+
+begin;
+select simple();
+insert into two values(3);
+select simple();
+rollback;
+
 -- The end
 drop table defaults;
 drop table two;
