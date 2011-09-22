@@ -103,9 +103,9 @@ static bool is_strict_saop(ScalarArrayOpExpr *expr, bool falseOK);
 static bool set_coercionform_dontcare_walker(Node *node, void *context);
 static Node *caching_const_expressions_mutator(Node *node,
 		   	   	   	   	   	   	  eval_const_expressions_context *context);
-static Node *eval_const_expressions_mutator(Node *node,
-							   eval_const_expressions_context *context,
-							   bool *cachable);
+static Node *const_expressions_mutator(Node *node,
+						  eval_const_expressions_context *context,
+						  bool *cachable);
 static List *simplify_or_arguments(List *args,
 					  eval_const_expressions_context *context,
 					  bool *haveNull, bool *forceTrue, bool *cachable);
@@ -2120,12 +2120,12 @@ estimate_expression_value(PlannerInfo *root, Node *node)
 	context.estimate = true;	/* unsafe transformations OK */
 	context.cache = false;		/* no caching, planner only evaluates once */
 
-	return eval_const_expressions_mutator(node, &context, &isCachable);
+	return const_expressions_mutator(node, &context, &isCachable);
 }
 
 /*
- * Calls eval_const_expressions_mutator on the expression tree and
- * automatically adds a CacheExpr node if the expression is cachable.
+ * Calls const_expressions_mutator on the expression tree and automatically
+ * adds a CacheExpr node if the expression is cachable.
  */
 static Node *
 caching_const_expressions_mutator(Node *node,
@@ -2136,7 +2136,7 @@ caching_const_expressions_mutator(Node *node,
 	if (node == NULL)
 		return NULL;
 
-	node = eval_const_expressions_mutator(node, context, &isCachable);
+	node = const_expressions_mutator(node, context, &isCachable);
 	if (isCachable && context->cache)
 		node = (Node *) insert_cache((Expr *) node);
 
@@ -2145,9 +2145,9 @@ caching_const_expressions_mutator(Node *node,
 
 
 static Node *
-eval_const_expressions_mutator(Node *node,
-							   eval_const_expressions_context *context,
-							   bool *cachable)
+const_expressions_mutator(Node *node,
+						  eval_const_expressions_context *context,
+						  bool *cachable)
 {
 	if (context->cache)
 		Assert(*cachable == true);
@@ -2331,14 +2331,14 @@ eval_const_expressions_mutator(Node *node,
 		 */
 		Assert(list_length(expr->args) == 2);
 
-		arg = eval_const_expressions_mutator(linitial(expr->args),
-											 context,
-											 &leftCachable);
+		arg = const_expressions_mutator(linitial(expr->args),
+										context,
+										&leftCachable);
 		args = lappend(args, arg);
 
-		arg = eval_const_expressions_mutator(lsecond(expr->args),
-											 context,
-											 &rightCachable);
+		arg = const_expressions_mutator(lsecond(expr->args),
+										context,
+										&rightCachable);
 		args = lappend(args, arg);
 
 		/*
@@ -2502,9 +2502,9 @@ eval_const_expressions_mutator(Node *node,
 					Node	   *arg;
 
 					Assert(list_length(expr->args) == 1);
-					arg = eval_const_expressions_mutator(linitial(expr->args),
-														 context,
-														 cachable);
+					arg = const_expressions_mutator(linitial(expr->args),
+													context,
+													cachable);
 
 					/*
 					 * Use negate_clause() to see if we can simplify away the
@@ -2539,9 +2539,9 @@ eval_const_expressions_mutator(Node *node,
 		RelabelType *relabel = (RelabelType *) node;
 		Node	   *arg;
 
-		arg = eval_const_expressions_mutator((Node *) relabel->arg,
-											 context,
-											 cachable);
+		arg = const_expressions_mutator((Node *) relabel->arg,
+										context,
+										cachable);
 
 		/*
 		 * If we find stacked RelabelTypes (eg, from foo :: int :: oid) we can
@@ -2657,9 +2657,9 @@ eval_const_expressions_mutator(Node *node,
 		 * Reduce constants in the ArrayCoerceExpr's argument, then build a
 		 * new ArrayCoerceExpr.
 		 */
-		arg = (Expr *) eval_const_expressions_mutator((Node *) expr->arg,
-													  context,
-													  cachable);
+		arg = (Expr *) const_expressions_mutator((Node *) expr->arg,
+												 context,
+												 cachable);
 
 		newexpr = makeNode(ArrayCoerceExpr);
 		newexpr->arg = arg;
@@ -2710,9 +2710,9 @@ eval_const_expressions_mutator(Node *node,
 		CollateExpr *collate = (CollateExpr *) node;
 		Node	   *arg;
 
-		arg = eval_const_expressions_mutator((Node *) collate->arg,
-											 context,
-											 cachable);
+		arg = const_expressions_mutator((Node *) collate->arg,
+										context,
+										cachable);
 
 		if (arg && IsA(arg, Const))
 		{
@@ -2814,8 +2814,8 @@ eval_const_expressions_mutator(Node *node,
 
 			/* Simplify this alternative's test condition */
 			casecond =
-				eval_const_expressions_mutator((Node *) oldcasewhen->expr,
-											   context, &condCachable);
+				const_expressions_mutator((Node *) oldcasewhen->expr,
+										  context, &condCachable);
 
 			/*
 			 * If the test condition is constant FALSE (or NULL), then drop
@@ -2834,8 +2834,8 @@ eval_const_expressions_mutator(Node *node,
 
 			/* Simplify this alternative's result value */
 			caseresult =
-				eval_const_expressions_mutator((Node *) oldcasewhen->result,
-											   context, &resultCachable);
+				const_expressions_mutator((Node *) oldcasewhen->result,
+										  context, &resultCachable);
 
 			/* If non-constant test condition, emit a new WHEN node */
 			if (!const_true_cond)
@@ -2880,8 +2880,8 @@ eval_const_expressions_mutator(Node *node,
 			bool		isCachable = true;
 
 			defresult =
-				eval_const_expressions_mutator((Node *) caseexpr->defresult,
-											   context, &isCachable);
+				const_expressions_mutator((Node *) caseexpr->defresult,
+										  context, &isCachable);
 
 			if (isCachable)
 			{
@@ -2986,9 +2986,9 @@ eval_const_expressions_mutator(Node *node,
 			Node	   *arg = lfirst(lc);
 			bool		isCachable = true;
 
-			arg = eval_const_expressions_mutator((Node *) arg,
-											   context,
-											   &isCachable);
+			arg = const_expressions_mutator((Node *) arg,
+											context,
+											&isCachable);
 
 			/*
 			 * We can remove null constants from the list. For a non-null
@@ -3059,9 +3059,9 @@ eval_const_expressions_mutator(Node *node,
 		FieldSelect *newfselect;
 		Node	   *arg;
 
-		arg = eval_const_expressions_mutator((Node *) fselect->arg,
-											 context,
-											 cachable);
+		arg = const_expressions_mutator((Node *) fselect->arg,
+										context,
+										cachable);
 		if (arg && IsA(arg, Var) &&
 			((Var *) arg)->varattno == InvalidAttrNumber)
 		{
@@ -3112,9 +3112,9 @@ eval_const_expressions_mutator(Node *node,
 		NullTest   *newntest;
 		Node	   *arg;
 
-		arg = eval_const_expressions_mutator((Node *) ntest->arg,
-											 context,
-											 cachable);
+		arg = const_expressions_mutator((Node *) ntest->arg,
+										context,
+										cachable);
 		if (arg && IsA(arg, RowExpr))
 		{
 			/*
@@ -3196,9 +3196,9 @@ eval_const_expressions_mutator(Node *node,
 		BooleanTest *newbtest;
 		Node	   *arg;
 
-		arg = eval_const_expressions_mutator((Node *) btest->arg,
-											 context,
-											 cachable);
+		arg = const_expressions_mutator((Node *) btest->arg,
+										context,
+										cachable);
 		if (arg && IsA(arg, Const))
 		{
 			Const	   *carg = (Const *) arg;
@@ -3255,9 +3255,9 @@ eval_const_expressions_mutator(Node *node,
 			{
 				PlaceHolderVar *phv = (PlaceHolderVar *) node;
 
-				return eval_const_expressions_mutator((Node *) phv->phexpr,
-													  context,
-													  cachable);
+				return const_expressions_mutator((Node *) phv->phexpr,
+												 context,
+												 cachable);
 			}
 			break;
 		case T_CacheExpr:
@@ -3271,7 +3271,7 @@ eval_const_expressions_mutator(Node *node,
 
 		Assert(context->estimate && !context->cache);
 
-		return eval_const_expressions_mutator((Node *) cache->arg, context, cachable);
+		return const_expressions_mutator((Node *) cache->arg, context, cachable);
 	}
 		default:
 			break;
@@ -3364,7 +3364,7 @@ simplify_or_arguments(List *args,
 		}
 
 		/* If it's not an OR, simplify it */
-		arg = eval_const_expressions_mutator(arg, context, &isCachable);
+		arg = const_expressions_mutator(arg, context, &isCachable);
 
 		/*
 		 * It is unlikely but not impossible for simplification of a non-OR
@@ -3507,7 +3507,7 @@ simplify_and_arguments(List *args,
 		}
 
 		/* If it's not an AND, simplify it */
-		arg = eval_const_expressions_mutator(arg, context, &isCachable);
+		arg = const_expressions_mutator(arg, context, &isCachable);
 
 		/*
 		 * It is unlikely but not impossible for simplification of a non-AND
@@ -3716,7 +3716,7 @@ simplify_function(Expr *oldexpr, Oid funcid,
 		Node	   *arg = (Node *) lfirst(lc);
 		bool		isCachable = true;
 
-		arg = eval_const_expressions_mutator(arg, context, &isCachable);
+		arg = const_expressions_mutator(arg, context, &isCachable);
 		lfirst(lc) = arg;
 
 		/*
@@ -4470,7 +4470,7 @@ inline_function(Oid funcid, Oid result_type, Oid result_collid,
 	 * the current function to the context list of active functions.
 	 */
 	context->active_fns = lcons_oid(funcid, context->active_fns);
-	newexpr = eval_const_expressions_mutator(newexpr, context, cachable);
+	newexpr = const_expressions_mutator(newexpr, context, cachable);
 	context->active_fns = list_delete_first(context->active_fns);
 
 	error_context_stack = sqlerrcontext.previous;
