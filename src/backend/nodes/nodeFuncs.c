@@ -1005,10 +1005,6 @@ exprSetCollation(Node *expr, Oid collation)
 		case T_CurrentOfExpr:
 			Assert(!OidIsValid(collation));		/* result is always boolean */
 			break;
-		case T_CacheExpr:
-			/* I think this should never occur, but leave this here just in case */
-			elog(ERROR, "Can't set collation on CacheExpr");
-			break;
 		default:
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(expr));
 			break;
@@ -2547,6 +2543,7 @@ expression_tree_mutator(Node *node,
 	/* can't get here, but keep compiler happy */
 	return NULL;
 }
+
 
 /*
  * query_tree_mutator --- initiate modification of a Query's expressions

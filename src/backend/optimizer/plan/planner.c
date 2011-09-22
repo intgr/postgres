@@ -167,7 +167,7 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 	/*
 	 * glob->isSimple is a hint to eval_const_expressions() and PL/pgSQL that
 	 * this statement is potentially a simple expression -- it contains no
-	 * table references, no subqueries and no joins clauses.
+	 * table references, no subqueries and no join clauses.
 	 *
 	 * We need this here because this prevents insertion of CacheExpr, which
 	 * would break simple expressions in PL/pgSQL. Such queries wouldn't

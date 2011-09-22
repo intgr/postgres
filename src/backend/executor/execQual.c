@@ -3762,7 +3762,7 @@ ExecEvalBooleanTest(GenericExprState *bstate,
 }
 
 /* ----------------------------------------------------------------
- * 		ExecEvalCacheExpr
+ *		ExecEvalCacheExpr
  *
  * Evaluates a cachable expression for the first time and updates
  * xprstate.evalfunc to return cached result next time
@@ -3798,10 +3798,11 @@ ExecEvalCacheExpr(CacheExprState *cstate, ExprContext *econtext,
 	return cstate->result;
 }
 
-/*
- * ExecEvalCacheExprResult
+/* ----------------------------------------------------------------
+ *		ExecEvalCacheExprResult
  *
  * Return the already-cached result, computed in ExecEvalCacheExpr
+ * ----------------------------------------------------------------
  */
 static Datum
 ExecEvalCacheExprResult(CacheExprState *cstate, ExprContext *econtext,
