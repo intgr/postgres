@@ -1035,7 +1035,7 @@ typedef struct BooleanTest
  * eval_const_expressions() function inserts CacheExpr nodes nodes at
  * strategic locations when it recognizes constant expressions that cannot be
  * constant-folded at plan time, such as expressions with Param references,
- * stable function and operator calls, etc
+ * stable function and operator calls with constant arguments, etc
  */
 typedef struct CacheExpr
 {

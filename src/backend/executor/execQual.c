@@ -160,12 +160,10 @@ static Datum ExecEvalCoerceToDomainValue(ExprState *exprstate,
 							bool *isNull, ExprDoneCond *isDone);
 static Datum ExecEvalCacheExpr(CacheExprState *cstate,
 				  ExprContext *econtext,
-				  bool *isNull,
-				  ExprDoneCond *isDone);
+				  bool *isNull,ExprDoneCond *isDone);
 static Datum ExecEvalCacheExprResult(CacheExprState *cstate,
 						ExprContext *econtext,
-						bool *isNull,
-						ExprDoneCond *isDone);
+						bool *isNull,ExprDoneCond *isDone);
 static Datum ExecEvalFieldSelect(FieldSelectState *fstate,
 					ExprContext *econtext,
 					bool *isNull, ExprDoneCond *isDone);
@@ -3766,14 +3764,13 @@ ExecEvalBooleanTest(GenericExprState *bstate,
 /* ----------------------------------------------------------------
  * 		ExecEvalCacheExpr
  *
- * 		XXX
+ * Evaluates a cachable expression for the first time and updates
+ * xprstate.evalfunc to return cached result next time
  * ----------------------------------------------------------------
  */
 static Datum
-ExecEvalCacheExpr(CacheExprState *cstate,
-				  ExprContext *econtext,
-				  bool *isNull,
-				  ExprDoneCond *isDone)
+ExecEvalCacheExpr(CacheExprState *cstate, ExprContext *econtext,
+				  bool *isNull, ExprDoneCond *isDone)
 {
 	MemoryContext oldcontext;
 	Datum		result;
@@ -3807,10 +3804,8 @@ ExecEvalCacheExpr(CacheExprState *cstate,
  * Return the already-cached result, computed in ExecEvalCacheExpr
  */
 static Datum
-ExecEvalCacheExprResult(CacheExprState *cstate,
-						ExprContext *econtext,
-						bool *isNull,
-						ExprDoneCond *isDone)
+ExecEvalCacheExprResult(CacheExprState *cstate, ExprContext *econtext,
+						bool *isNull, ExprDoneCond *isDone)
 {
 	if (isDone)
 		*isDone = ExprSingleResult;

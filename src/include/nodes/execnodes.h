@@ -675,8 +675,8 @@ typedef struct FuncExprState
 /* ----------------
  *		CacheExprState node
  *
- * Takes care of caching execution-time constants (that cannot be cached at
- * plan-time).
+ * Takes care of caching execution-time constants that cannot be constant
+ * folded at plan-time.
  * ----------------
  */
 typedef struct CacheExprState

@@ -2527,7 +2527,7 @@ eval_const_expressions_mutator(Node *node,
 		 * XXX should we ereport() here instead?  Probably this routine should
 		 * never be invoked after SubPlan creation.
 		 */
-		*cachable = false;	/* XXX cachable? */
+		*cachable = false;
 		return node;
 		case T_RelabelType:
 	{
@@ -2640,7 +2640,7 @@ eval_const_expressions_mutator(Node *node,
 		 * argument.
 		 */
 		newexpr = makeNode(CoerceViaIO);
-		newexpr->arg = (Expr *) linitial(args); /* XXX this didn't use simplified arg before? */
+		newexpr->arg = (Expr *) linitial(args);
 		newexpr->resulttype = expr->resulttype;
 		newexpr->resultcollid = expr->resultcollid;
 		newexpr->coerceformat = expr->coerceformat;
@@ -3311,7 +3311,14 @@ eval_const_expressions_mutator(Node *node,
  * by the caller.  They will be set TRUE if a null constant or true constant,
  * respectively, is detected anywhere in the argument list.
  *
- * XXX update comment
+ * We divide elements into two separate lists, one for cachable items and one
+ * for non-cachable items. Upon returning, the cachable sub-list is turned
+ * into a new BoolExpr, cached and prepended. This is done in hopes that the
+ * cachable sub-list is faster to evaluate and short-cicruits the rest of the
+ * expression.
+ *
+ * Input:  (cachable OR uncachable OR cachable OR uncachable)
+ * Output: (CACHE(cachable OR cachable) OR uncachable OR uncachable)
  */
 static List *
 simplify_or_arguments(List *args,
@@ -3321,11 +3328,6 @@ simplify_or_arguments(List *args,
 	List	   *nocache_args = NIL;
 	List	   *cachable_args = NIL;
 	List	   *unprocessed_args;
-
-	/*
-	 * XXX we could group cachable expressions together here and cache the
-	 * whole list as one boolean expression
-	 */
 
 	/*
 	 * Since the parser considers OR to be a binary operator, long OR lists
@@ -3339,7 +3341,7 @@ simplify_or_arguments(List *args,
 	while (unprocessed_args)
 	{
 		Node	   *arg = (Node *) linitial(unprocessed_args);
-		bool		isCachable = true; /* XXX return to caller */
+		bool		isCachable = true;
 
 		unprocessed_args = list_delete_first(unprocessed_args);
 
@@ -3403,7 +3405,7 @@ simplify_or_arguments(List *args,
 			continue;
 		}
 
-		/* else emit the simplified arg into the result list XXX update comment */
+		/* else emit the simplified arg into the result list */
 		if (isCachable)
 			cachable_args = lappend(cachable_args, arg);
 		else
@@ -3416,15 +3418,17 @@ simplify_or_arguments(List *args,
 
 		/* Build a new expression for cachable sub-list */
 		if (list_length(cachable_args) == 1)
-			arg = linitial(cachable_args); /* XXX leaks list header */
+			arg = linitial(cachable_args);
 		else
 			arg = makeBoolExpr(OR_EXPR, cachable_args, -1);
+
+		arg = insert_cache(arg);
 
 		/*
 		 * Assume that the cachable expression is cheaper to evaluate, so put
 		 * it first
 		 */
-		nocache_args = lcons(insert_cache(arg), nocache_args);
+		nocache_args = lcons(arg, nocache_args);
 
 		*cachable = false;
 		return nocache_args;
@@ -3435,10 +3439,7 @@ simplify_or_arguments(List *args,
 		return nocache_args;
 	}
 	else
-	{
-		*cachable = true;
 		return cachable_args;
-	}
 }
 
 /*
@@ -3460,7 +3461,14 @@ simplify_or_arguments(List *args,
  * by the caller.  They will be set TRUE if a null constant or false constant,
  * respectively, is detected anywhere in the argument list.
  *
- * XXX update comment
+ * We divide elements into two separate lists, one for cachable items and one
+ * for non-cachable items. Upon returning, the cachable sub-list is turned
+ * into a new BoolExpr, cached and prepended. This is done in hopes that the
+ * cachable sub-list is faster to evaluate and short-cicruits the rest of the
+ * expression.
+ *
+ * Input:  (cachable OR uncachable OR cachable OR uncachable)
+ * Output: (CACHE(cachable OR cachable) OR uncachable OR uncachable)
  */
 static List *
 simplify_and_arguments(List *args,
@@ -3476,7 +3484,7 @@ simplify_and_arguments(List *args,
 	while (unprocessed_args)
 	{
 		Node	   *arg = (Node *) linitial(unprocessed_args);
-		bool		isCachable = true; /* XXX return to caller */
+		bool		isCachable = true;
 
 		unprocessed_args = list_delete_first(unprocessed_args);
 
@@ -3553,15 +3561,17 @@ simplify_and_arguments(List *args,
 
 		/* Build a new expression for cachable sub-list */
 		if (list_length(cachable_args) == 1)
-			arg = linitial(cachable_args); /* XXX leaks list header */
+			arg = linitial(cachable_args);
 		else
 			arg = makeBoolExpr(AND_EXPR, cachable_args, -1);
+
+		arg = insert_cache(arg);
 
 		/*
 		 * Assume that the cachable expression is cheaper to evaluate, so put
 		 * it first
 		 */
-		nocache_args = lcons(insert_cache(arg), nocache_args);
+		nocache_args = lcons(arg, nocache_args);
 
 		*cachable = false;
 		return nocache_args;
@@ -3572,10 +3582,7 @@ simplify_and_arguments(List *args,
 		return nocache_args;
 	}
 	else
-	{
-		*cachable = true;
 		return cachable_args;
-	}
 }
 
 /*

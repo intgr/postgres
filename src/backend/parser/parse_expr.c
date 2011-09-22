@@ -323,7 +323,6 @@ transformExpr(ParseState *pstate, Node *expr)
 		case T_CollateExpr:
 		case T_CaseTestExpr:
 		case T_ArrayExpr:
-		/* case T_CacheExpr: XXX ??? */
 		case T_CoerceToDomain:
 		case T_CoerceToDomainValue:
 		case T_SetToDefault:
