@@ -65,7 +65,7 @@ typedef struct
 	List	   *active_fns;
 	Node	   *case_val;
 	bool		estimate;
-	bool		cache;			/* insert cache nodes where possible? */
+	bool		use_cache;			/* insert cache nodes where possible? */
 } eval_const_expressions_context;
 
 typedef struct
@@ -2082,7 +2082,7 @@ eval_const_expressions(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = false;	/* safe transformations only */
-	context.cache = enable_cacheexpr &&
+	context.use_cache = enable_cacheexpr &&
 					(root == NULL || !root->glob->isSimple);
 
 	return caching_const_expressions_mutator(node, &context);
@@ -2118,7 +2118,7 @@ estimate_expression_value(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = true;	/* unsafe transformations OK */
-	context.cache = false;		/* no caching, planner only evaluates once */
+	context.use_cache = false;	/* no caching, planner only evaluates once */
 
 	return const_expressions_mutator(node, &context, &isCachable);
 }
@@ -2137,7 +2137,7 @@ caching_const_expressions_mutator(Node *node,
 		return NULL;
 
 	node = const_expressions_mutator(node, context, &isCachable);
-	if (isCachable && context->cache)
+	if (isCachable && context->use_cache)
 		node = (Node *) insert_cache((Expr *) node);
 
 	return node;
@@ -2149,7 +2149,7 @@ const_expressions_mutator(Node *node,
 						  eval_const_expressions_context *context,
 						  bool *cachable)
 {
-	if (context->cache)
+	if (context->use_cache)
 		Assert(*cachable == true);
 
 	if (node == NULL)
@@ -2687,7 +2687,7 @@ const_expressions_mutator(Node *node,
 		 * If the argument is cachable, but conversion isn't, insert a
 		 * CacheExpr above the argument
 		 */
-		if (context->cache && arg && *cachable &&
+		if (context->use_cache && arg && *cachable &&
 			(OidIsValid(newexpr->elemfuncid) &&
 			func_volatile(newexpr->elemfuncid) == PROVOLATILE_VOLATILE))
 		{
@@ -2849,7 +2849,7 @@ const_expressions_mutator(Node *node,
 
 				if (condCachable)
 				{
-					if (context->cache && is_cache_useful((Expr *) casecond))
+					if (context->use_cache && is_cache_useful((Expr *) casecond))
 						cachable_args = lappend(cachable_args, &newcasewhen->expr);
 				}
 				else
@@ -2857,7 +2857,7 @@ const_expressions_mutator(Node *node,
 
 				if (resultCachable)
 				{
-					if (context->cache && is_cache_useful((Expr *) caseresult))
+					if (context->use_cache && is_cache_useful((Expr *) caseresult))
 						cachable_args = lappend(cachable_args, &newcasewhen->result);
 				}
 				else
@@ -2885,7 +2885,7 @@ const_expressions_mutator(Node *node,
 
 			if (isCachable)
 			{
-				if (context->cache && is_cache_useful((Expr *) defresult))
+				if (context->use_cache && is_cache_useful((Expr *) defresult))
 					cachable_args = lappend(cachable_args, &defresult);
 			}
 			else
@@ -3011,7 +3011,7 @@ const_expressions_mutator(Node *node,
 
 			if (isCachable)
 			{
-				if (context->cache && is_cache_useful((Expr *) arg))
+				if (context->use_cache && is_cache_useful((Expr *) arg))
 					cachable_args = lappend(cachable_args, &llast(newargs));
 			}
 			else
@@ -3269,7 +3269,7 @@ const_expressions_mutator(Node *node,
 		 */
 		CacheExpr *cache = (CacheExpr *) node;
 
-		Assert(context->estimate && !context->cache);
+		Assert(context->estimate && !context->use_cache);
 
 		return const_expressions_mutator((Node *) cache->arg, context, cachable);
 	}
@@ -3733,7 +3733,7 @@ simplify_function(Expr *oldexpr, Oid funcid,
 		 */
 		if (isCachable)
 		{
-			if(context->cache && is_cache_useful((Expr *) arg))
+			if(context->use_cache && is_cache_useful((Expr *) arg))
 				cachable_args = lappend(cachable_args, &lfirst(lc));
 		}
 		else
