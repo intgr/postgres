@@ -143,7 +143,7 @@ static Node *substitute_actual_parameters(Node *expr, int nargs, List *args,
 static Node *substitute_actual_parameters_mutator(Node *node,
 							  substitute_actual_parameters_context *context);
 static void sql_inline_error_callback(void *arg);
-static bool is_cache_useful(Expr *expr);
+static inline bool is_cache_useful(Expr *expr);
 static Expr *insert_cache(Expr *expr);
 static Expr *evaluate_expr(Expr *expr, Oid result_type, int32 result_typmod,
 			  Oid result_collation);
@@ -4552,8 +4552,10 @@ sql_inline_error_callback(void *arg)
 /*
  * Is it useful to cache this expression? Constants and param references are
  * always fast to access so don't insert cache in front of those.
+ *
+ * Without inline, we lose almost 10% time in some very simple queries (!)
  */
-static bool
+static inline bool
 is_cache_useful(Expr *expr)
 {
 	if (IsA(expr, Const))
