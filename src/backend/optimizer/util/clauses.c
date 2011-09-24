@@ -2143,14 +2143,18 @@ caching_const_expressions_mutator(Node *node,
 	return node;
 }
 
-
+/*
+ * Returns a mutated node tree and determines its cachability.
+ *
+ * The caller must make sure that cachable points to a boolean value that's
+ * initialized to TRUE (if context->use_cache is enabled).
+ */
 static Node *
 const_expressions_mutator(Node *node,
 						  eval_const_expressions_context *context,
 						  bool *cachable)
 {
-	if (context->use_cache)
-		Assert(*cachable == true);
+	Assert(!context->use_cache || *cachable == true);
 
 	if (node == NULL)
 		return NULL;
