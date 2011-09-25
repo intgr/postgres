@@ -2083,7 +2083,7 @@ eval_const_expressions(PlannerInfo *root, Node *node)
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = false;	/* safe transformations only */
 	context.use_cache = enable_cacheexpr &&
-					(root == NULL || !root->glob->isSimple);
+						(root == NULL || !root->glob->isSimple);
 
 	return caching_const_expressions_mutator(node, &context);
 }
