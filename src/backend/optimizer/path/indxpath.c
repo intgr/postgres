@@ -17,10 +17,14 @@
 
 #include <math.h>
 
+#include "access/genam.h"
+#include "access/heapam.h"
 #include "access/skey.h"
 #include "access/sysattr.h"
+#include "catalog/indexing.h"
 #include "catalog/pg_am.h"
 #include "catalog/pg_collation.h"
+#include "catalog/pg_constraint.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_type.h"
@@ -34,9 +38,12 @@
 #include "optimizer/var.h"
 #include "utils/builtins.h"
 #include "utils/bytea.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/pg_locale.h"
 #include "utils/selfuncs.h"
+#include "utils/tqual.h"
+#include "storage/lock.h"
 
 
 #define IsBooleanOpfamily(opfamily) \
@@ -116,6 +123,8 @@ static bool matches_any_index(RestrictInfo *rinfo, RelOptInfo *rel,
 				  Relids outer_relids);
 static List *find_clauses_for_join(PlannerInfo *root, RelOptInfo *rel,
 					  Relids outer_relids, bool isouterjoin);
+static bool unique_index_is_consistent(Oid reloid, Oid indexoid,
+								Oid *conoid);
 static bool match_boolean_index_clause(Node *clause, int indexcol,
 						   IndexOptInfo *index);
 static bool match_special_index_operator(Expr *clause,
@@ -2248,6 +2257,71 @@ find_clauses_for_join(PlannerInfo *root, RelOptInfo *rel,
 }
 
 /*
+ * unique_constraint_is_consistent
+ *	  Make sure that a unique index's respective constraint is validated and
+ *	  not deferrable. Sets *conoid to the found constraint OID, or InvalidOid
+ *	  if not found.
+ *
+ * This is expensive; there is on index on pg_constraint.conindid, so we have
+ * to scan all constraints on the relation.
+ */
+static bool
+unique_index_is_consistent(Oid reloid, Oid indexoid,
+						   Oid *conoid)
+{
+	/* If no constraint is found, then the index cannot be invalid/deferrable */
+	bool		result = true;
+	Relation	pg_constraint;
+	HeapTuple	tuple;
+	SysScanDesc scan;
+	ScanKeyData skey[1];
+
+	*conoid = InvalidOid;
+
+	/* Scan pg_constraint for constraints of the target rel */
+	pg_constraint = heap_open(ConstraintRelationId, AccessShareLock);
+
+	ScanKeyInit(&skey[0],
+				Anum_pg_constraint_conrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(reloid));
+
+	scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true,
+							  SnapshotNow, 1, skey);
+
+	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+	{
+		Form_pg_constraint con = (Form_pg_constraint) GETSTRUCT(tuple);
+
+		if (con->conindid == indexoid)
+		{
+			if (con->condeferrable)
+				result = false;
+
+			/*
+			 * Currently unique constraints are always valid, but that could
+			 * change in the future. This check costs us nothing.
+			 */
+			if (!con->convalidated)
+				result = false;
+
+			*conoid = HeapTupleGetOid(tuple);
+
+			/*
+			 * Stop searching since we found a constraint. Assumes that
+			 * conindid is unique.
+			 */
+			break;
+		}
+	}
+
+	systable_endscan(scan);
+	heap_close(pg_constraint, AccessShareLock);
+
+	return result;
+}
+
+/*
  * relation_has_unique_index_for
  *	  Determine whether the relation provably has at most one row satisfying
  *	  a set of equality conditions, because the conditions constrain all
@@ -2274,6 +2348,8 @@ relation_has_unique_index_for(PlannerInfo *root, RelOptInfo *rel,
 	foreach(ic, rel->indexlist)
 	{
 		IndexOptInfo *ind = (IndexOptInfo *) lfirst(ic);
+		RangeTblEntry *rte;
+		Oid			conoid = InvalidOid;
 		int			c;
 
 		/*
@@ -2326,8 +2402,29 @@ relation_has_unique_index_for(PlannerInfo *root, RelOptInfo *rel,
 		}
 
 		/* Matched all columns of this index? */
-		if (c == ind->ncolumns)
-			return true;
+		if (c != ind->ncolumns)
+			continue;
+
+		/*
+		 * Deferrable or invalid constraints don't qualify for removal. This
+		 * check is last since it's the most expensive -- requires a catalog
+		 * lookup.
+		 *
+		 * It's tempting to peek into the queue of deferred unique checks
+		 * and see if it's empty, but there's no mechanism to invalidate the
+		 * plan when that queue changes.
+		 */
+		rte = root->simple_rte_array[rel->relid];
+		Assert(rte->rtekind == RTE_RELATION);
+
+		if (!unique_index_is_consistent(rte->relid, ind->indexoid, &conoid))
+			continue;
+
+		/* Query plan now relies on this constraint */
+		if (conoid != InvalidOid)
+			root->parse->constraintDeps = lappend_oid(root->parse->constraintDeps, conoid);
+
+		return true;
 	}
 
 	return false;

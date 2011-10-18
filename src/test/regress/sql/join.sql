@@ -736,3 +736,27 @@ SELECT * FROM
   ON true;
 
 rollback;
+
+-- and just one more bug, deferrable unique constraints can't be relied on
+create temp table uniq (i int);
+create unique index uniq_i_idx on uniq (i);
+
+begin;
+prepare join_removal as
+  select a.* from uniq as a left join uniq as b using (i);
+
+explain (costs off) execute join_removal;
+
+-- query must be replanned after a deferrable constraint is added
+alter table uniq add constraint uniq_i_idx
+	unique using index uniq_i_idx deferrable initially deferred;
+
+explain (costs off) execute join_removal;
+
+-- test actual results
+insert into uniq values(1),(1);
+execute join_removal;
+
+rollback;
+deallocate join_removal;
+drop table uniq;

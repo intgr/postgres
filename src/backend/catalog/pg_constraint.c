@@ -842,8 +842,8 @@ check_functional_grouping(Oid relid,
 		/* Only PK constraints are of interest for now, see comment above */
 		if (con->contype != CONSTRAINT_PRIMARY)
 			continue;
-		/* Constraint must be non-deferrable */
-		if (con->condeferrable)
+		/* Constraint must be non-deferrable and valid */
+		if (con->condeferrable || !con->convalidated)
 			continue;
 
 		/* Extract the conkey array, ie, attnums of PK's columns */
