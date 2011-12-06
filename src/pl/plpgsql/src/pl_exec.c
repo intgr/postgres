@@ -5710,13 +5710,8 @@ exec_simple_check_node(Node *node)
 			}
 
 		case T_CacheExpr:
-			/*
-			 * The planner should prevent generation of CacheExprs in queries
-			 * that can be deemed simple, see standard_planner()
-			 */
-			ereport(WARNING,
-					(errmsg("potentially-simple expression contains CacheExpr")));
-			return FALSE;
+			/* Caching is disabled for simple expressions */
+			return TRUE;
 
 		default:
 			return FALSE;

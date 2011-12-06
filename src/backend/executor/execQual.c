@@ -3780,6 +3780,9 @@ ExecEvalCacheExpr(CacheExprState *cstate, ExprContext *econtext,
 
 	result = ExecEvalExpr(cstate->subexpr, econtext, isNull, isDone);
 
+	if (!cstate->cacheEnabled)
+		return result;	/* Cache disabled, pass thru the result */
+
 	/* Set-returning expressions can't be cached */
 	Assert(isDone == NULL || *isDone == ExprSingleResult);
 
@@ -4926,6 +4929,15 @@ ExecInitExpr(Expr *node, PlanState *parent)
 
 				cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCacheExpr;
 				cstate->subexpr = ExecInitExpr(cache->arg, parent);
+				/*
+				 * We only enable cache when there's an associated PlanState.
+				 * For other callers we can't guarantee the
+				 * lifetime/invalidation of the cache.
+				 */
+				if (parent)
+					cstate->cacheEnabled = true;
+				else
+					cstate->cacheEnabled = false;
 
 				state = (ExprState *) cstate;
 			}

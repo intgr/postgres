@@ -49,9 +49,6 @@
 #include "utils/typcache.h"
 
 
-bool		enable_cacheexpr = true;
-
-
 typedef struct
 {
 	PlannerInfo *root;
@@ -65,7 +62,6 @@ typedef struct
 	List	   *active_fns;
 	Node	   *case_val;
 	bool		estimate;
-	bool		use_cache;		/* insert cache nodes where possible? */
 } eval_const_expressions_context;
 
 typedef struct
@@ -2222,8 +2218,6 @@ eval_const_expressions(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = false;	/* safe transformations only */
-	context.use_cache = enable_cacheexpr &&
-		(root == NULL || !root->glob->isSimple);
 
 	return caching_const_expressions_mutator(node, &context);
 }
@@ -2250,7 +2244,7 @@ Node *
 estimate_expression_value(PlannerInfo *root, Node *node)
 {
 	eval_const_expressions_context context;
-	bool		isCachable = false;		/* short-circuit some checks */
+	bool		isCachable = true;
 
 	context.boundParams = root->glob->boundParams;		/* bound Params */
 	/* we do not need to mark the plan as depending on inlined functions */
@@ -2258,7 +2252,6 @@ estimate_expression_value(PlannerInfo *root, Node *node)
 	context.active_fns = NIL;	/* nothing being recursively simplified */
 	context.case_val = NULL;	/* no CASE being examined */
 	context.estimate = true;	/* unsafe transformations OK */
-	context.use_cache = false;	/* no caching, planner only evaluates once */
 
 	return const_expressions_mutator(node, &context, &isCachable);
 }
@@ -2277,7 +2270,7 @@ caching_const_expressions_mutator(Node *node,
 		return NULL;
 
 	node = const_expressions_mutator(node, context, &isCachable);
-	if (isCachable && context->use_cache)
+	if (isCachable)
 		node = (Node *) insert_cache((Expr *) node);
 
 	return node;
@@ -2287,14 +2280,14 @@ caching_const_expressions_mutator(Node *node,
  * Returns a mutated node tree and determines its cachability.
  *
  * The caller must make sure that cachable points to a boolean value that's
- * initialized to TRUE (if context->use_cache is enabled).
+ * initialized to TRUE.
  */
 static Node *
 const_expressions_mutator(Node *node,
 						  eval_const_expressions_context *context,
 						  bool *cachable)
 {
-	Assert(!context->use_cache || *cachable == true);
+	Assert(*cachable == true);
 
 	if (node == NULL)
 		return NULL;
@@ -2870,8 +2863,7 @@ const_expressions_mutator(Node *node,
 				 * If the argument is cachable, but conversion isn't, insert a
 				 * CacheExpr above the argument
 				 */
-				if (context->use_cache && arg && *cachable &&
-					(OidIsValid(newexpr->elemfuncid) &&
+				if (arg && *cachable && (OidIsValid(newexpr->elemfuncid) &&
 				 func_volatile(newexpr->elemfuncid) == PROVOLATILE_VOLATILE))
 				{
 					*cachable = false;
@@ -3035,7 +3027,7 @@ const_expressions_mutator(Node *node,
 
 						if (condCachable)
 						{
-							if (context->use_cache && is_cache_useful((Expr *) casecond))
+							if (is_cache_useful((Expr *) casecond))
 								cachable_args = lappend(cachable_args, &newcasewhen->expr);
 						}
 						else
@@ -3043,7 +3035,7 @@ const_expressions_mutator(Node *node,
 
 						if (resultCachable)
 						{
-							if (context->use_cache && is_cache_useful((Expr *) caseresult))
+							if (is_cache_useful((Expr *) caseresult))
 								cachable_args = lappend(cachable_args, &newcasewhen->result);
 						}
 						else
@@ -3072,7 +3064,7 @@ const_expressions_mutator(Node *node,
 
 					if (isCachable)
 					{
-						if (context->use_cache && is_cache_useful((Expr *) defresult))
+						if (is_cache_useful((Expr *) defresult))
 							cachable_args = lappend(cachable_args, &defresult);
 					}
 					else
@@ -3133,7 +3125,7 @@ const_expressions_mutator(Node *node,
 				List	   *newelems;
 				ListCell   *element;
 
-				*cachable = false;		/* XXX cachable! */
+				*cachable = false;	/* Not implemented */
 
 				newelems = NIL;
 				foreach(element, arrayexpr->elements)
@@ -3203,7 +3195,7 @@ const_expressions_mutator(Node *node,
 
 					if (isCachable)
 					{
-						if (context->use_cache && is_cache_useful((Expr *) arg))
+						if (is_cache_useful((Expr *) arg))
 							cachable_args = lappend(cachable_args, &llast(newargs));
 					}
 					else
@@ -3443,7 +3435,6 @@ const_expressions_mutator(Node *node,
 				return (Node *) newbtest;
 			}
 		case T_PlaceHolderVar:
-
 			/*
 			 * In estimation mode, just strip the PlaceHolderVar node
 			 * altogether; this amounts to estimating that the contained value
@@ -3451,34 +3442,29 @@ const_expressions_mutator(Node *node,
 			 * just use the default behavior (ie, simplify the expression but
 			 * leave the PlaceHolderVar node intact).
 			 */
+			*cachable = false;
+
 			if (context->estimate)
 			{
 				PlaceHolderVar *phv = (PlaceHolderVar *) node;
+				bool isCachable = true;	/* ignored */
 
 				return const_expressions_mutator((Node *) phv->phexpr,
 												 context,
-												 cachable);
+												 &isCachable);
 			}
+			break;
+		case T_Const:
+			/* Keep *cachable=true */
 			break;
 		case T_CacheExpr:
-			{
-				/*
-				 * The planner asked us to re-simplify a simplified expression
-				 * tree. Strip CacheExpr nodes since the planner only
-				 * evaluates the expression once.
-				 */
-				CacheExpr  *cache = (CacheExpr *) node;
-
-				Assert(context->estimate && !context->use_cache);
-
-				return const_expressions_mutator((Node *) cache->arg, context, cachable);
-			}
+			/* We already have CacheExpr in the appropriate place */
+			/* FALL THRU */
 		default:
+			/* Everything else is not cachable */
+			*cachable = false;
 			break;
 	}
-
-	if (!IsA(node, Const))
-		*cachable = false;		/* Everything else is not cachable */
 
 	/*
 	 * For any node type not handled above, we recurse using
@@ -3886,7 +3872,7 @@ simplify_function(Expr *oldexpr, Oid funcid,
 	Oid			transform;
 	ListCell   *lc;
 	List	   *args = NIL;
-	List	   *cachable_args = NIL;	/* XXX use bitmapset instead? */
+	List	   *cachable_args = NIL;
 
 	/*
 	 * We have three strategies for simplification: execute the function to
@@ -3934,7 +3920,7 @@ simplify_function(Expr *oldexpr, Oid funcid,
 		 */
 		if (isCachable)
 		{
-			if (context->use_cache && is_cache_useful((Expr *) arg))
+			if (is_cache_useful((Expr *) arg))
 				cachable_args = lappend(cachable_args, &lfirst(lc));
 		}
 		else
