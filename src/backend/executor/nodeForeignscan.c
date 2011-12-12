@@ -129,10 +129,12 @@ ExecInitForeignScan(ForeignScan *node, EState *estate, int eflags)
 	 */
 	scanstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) scanstate);
+					 (PlanState *) scanstate,
+					 true);
 	scanstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) scanstate);
+					 (PlanState *) scanstate,
+					 true);
 
 	/*
 	 * tuple table initialization

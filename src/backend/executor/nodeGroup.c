@@ -225,10 +225,12 @@ ExecInitGroup(Group *node, EState *estate, int eflags)
 	 */
 	grpstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) grpstate);
+					 (PlanState *) grpstate,
+					 true);
 	grpstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->plan.qual,
-					 (PlanState *) grpstate);
+					 (PlanState *) grpstate,
+					 true);
 
 	/*
 	 * initialize child nodes
