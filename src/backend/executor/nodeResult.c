@@ -240,12 +240,15 @@ ExecInitResult(Result *node, EState *estate, int eflags)
 	 */
 	resstate->ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) resstate);
+					 (PlanState *) resstate,
+					 true);
 	resstate->ps.qual = (List *)
 		ExecInitExpr((Expr *) node->plan.qual,
-					 (PlanState *) resstate);
+					 (PlanState *) resstate,
+					 true);
 	resstate->resconstantqual = ExecInitExpr((Expr *) node->resconstantqual,
-											 (PlanState *) resstate);
+											 (PlanState *) resstate,
+											 true);
 
 	/*
 	 * initialize child nodes

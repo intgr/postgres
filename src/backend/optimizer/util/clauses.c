@@ -4799,7 +4799,7 @@ evaluate_expr(Expr *expr, Oid result_type, int32 result_typmod,
 	 * Prepare expr for execution.	(Note: we can't use ExecPrepareExpr
 	 * because it'd result in recursively invoking eval_const_expressions.)
 	 */
-	exprstate = ExecInitExpr(expr, NULL);
+	exprstate = ExecInitExpr(expr, NULL, false);
 
 	/*
 	 * And evaluate it.

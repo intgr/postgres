@@ -182,10 +182,12 @@ ExecInitSeqScan(SeqScan *node, EState *estate, int eflags)
 	 */
 	scanstate->ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) scanstate);
+					 (PlanState *) scanstate,
+					 true);
 	scanstate->ps.qual = (List *)
 		ExecInitExpr((Expr *) node->plan.qual,
-					 (PlanState *) scanstate);
+					 (PlanState *) scanstate,
+					 true);
 
 	/*
 	 * tuple table initialization
