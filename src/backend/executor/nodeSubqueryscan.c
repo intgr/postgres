@@ -122,10 +122,12 @@ ExecInitSubqueryScan(SubqueryScan *node, EState *estate, int eflags)
 	 */
 	subquerystate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) subquerystate);
+					 (PlanState *) subquerystate,
+					 true);
 	subquerystate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) subquerystate);
+					 (PlanState *) subquerystate,
+					 true);
 
 	/*
 	 * tuple table initialization

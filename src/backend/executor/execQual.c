@@ -5042,7 +5042,7 @@ ExecPrepareExpr(Expr *node, EState *estate)
 
 	node = expression_planner(node);
 
-	result = ExecInitExpr(node, NULL);
+	result = ExecInitExpr(node, NULL, false);
 
 	MemoryContextSwitchTo(oldcontext);
 
