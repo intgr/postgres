@@ -159,6 +159,12 @@ copy defaults (dummy) from stdin;
 3
 \.
 
+-- VALUES list expressions
+-- The fact that there are be 3 lines of 'VOLATILE TRUE' output is a quirk of
+-- the current set-returning function execution code
+insert into defaults (dummy, a, b)
+values (generate_series(4, 5), stable_true(), volatile_true());
+
 -- PL/pgSQL Simple expressions
 -- Make sure we don't cache simple expressions -- these expressions are only
 -- initialized once per transaction and then executed multiple times

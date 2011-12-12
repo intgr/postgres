@@ -60,6 +60,13 @@
 #include "utils/xml.h"
 
 
+typedef struct
+{
+	PlanState  *parent;
+	bool		useCache;
+} ExecInitExprContext;
+
+
 /* static function decls */
 static Datum ExecEvalArrayRef(ArrayRefExprState *astate,
 				 ExprContext *econtext,
@@ -188,6 +195,8 @@ static Datum ExecEvalArrayCoerceExpr(ArrayCoerceExprState *astate,
 						bool *isNull, ExprDoneCond *isDone);
 static Datum ExecEvalCurrentOfExpr(ExprState *exprstate, ExprContext *econtext,
 					  bool *isNull, ExprDoneCond *isDone);
+static ExprState *ExecInitExprMutator(Expr *node,
+		const ExecInitExprContext *context);
 
 
 /* ----------------------------------------------------------------
@@ -3876,14 +3885,15 @@ ExecEvalCacheExpr(CacheExprState *cstate, ExprContext *econtext,
 	int16		resultTypLen;
 	Oid			resultType;
 
-	result = ExecEvalExpr(cstate->subexpr, econtext, isNull, isDone);
+	result = ExecEvalExpr(cstate->arg, econtext, isNull, isDone);
 
-	if (!cstate->cacheEnabled)
+	if (!cstate->enabled)
 		return result;	/* Cache disabled, pass thru the result */
 
 	/* Set-returning expressions can't be cached */
 	Assert(isDone == NULL || *isDone == ExprSingleResult);
 
+	/* Figure out type and size for copy */
 	resultType = exprType((Node *) ((CacheExpr *) cstate->xprstate.expr)->arg);
 	get_typlenbyval(resultType, &resultTypLen, &resultTypByVal);
 
@@ -4386,13 +4396,30 @@ ExecEvalExprSwitchContext(ExprState *expression,
  *
  *	'node' is the root of the expression tree to examine
  *	'parent' is the PlanState node that owns the expression.
+ *	'useCache' enables caching for stable/parameterized expressions.
  *
  * 'parent' may be NULL if we are preparing an expression that is not
  * associated with a plan tree.  (If so, it can't have aggs or subplans.)
  * This case should usually come through ExecPrepareExpr, not directly here.
+ *
+ * 'useCache' may only be true if it's guaranteed that all executions of the
+ * expression use the same snapshot and same external params. It should also
+ * be false if the expression is only executed once.
  */
 ExprState *
-ExecInitExpr(Expr *node, PlanState *parent)
+ExecInitExpr(Expr *node, PlanState *parent, bool useCache)
+{
+	ExecInitExprContext context;
+
+	context.parent = parent;
+	context.useCache = useCache;
+
+	return ExecInitExprMutator(node, &context);
+}
+
+static ExprState *
+ExecInitExprMutator(Expr *node,
+					const ExecInitExprContext *context)
 {
 	ExprState  *state;
 
@@ -4455,16 +4482,16 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				AggrefExprState *astate = makeNode(AggrefExprState);
 
 				astate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalAggref;
-				if (parent && IsA(parent, AggState))
+				if (context->parent && IsA(context->parent, AggState))
 				{
-					AggState   *aggstate = (AggState *) parent;
+					AggState   *aggstate = (AggState *) context->parent;
 					int			naggs;
 
 					aggstate->aggs = lcons(astate, aggstate->aggs);
 					naggs = ++aggstate->numaggs;
 
-					astate->args = (List *) ExecInitExpr((Expr *) aggref->args,
-														 parent);
+					astate->args = (List *)
+						ExecInitExprMutator((Expr *) aggref->args, context);
 
 					/*
 					 * Complain if the aggregate's arguments contain any
@@ -4491,9 +4518,9 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				WindowFuncExprState *wfstate = makeNode(WindowFuncExprState);
 
 				wfstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalWindowFunc;
-				if (parent && IsA(parent, WindowAggState))
+				if (context->parent && IsA(context->parent, WindowAggState))
 				{
-					WindowAggState *winstate = (WindowAggState *) parent;
+					WindowAggState *winstate = (WindowAggState *) context->parent;
 					int			nfuncs;
 
 					winstate->funcs = lcons(wfstate, winstate->funcs);
@@ -4501,8 +4528,8 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					if (wfunc->winagg)
 						winstate->numaggs++;
 
-					wfstate->args = (List *) ExecInitExpr((Expr *) wfunc->args,
-														  parent);
+					wfstate->args = (List *)
+						ExecInitExprMutator((Expr *) wfunc->args, context);
 
 					/*
 					 * Complain if the windowfunc's arguments contain any
@@ -4530,12 +4557,12 @@ ExecInitExpr(Expr *node, PlanState *parent)
 
 				astate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalArrayRef;
 				astate->refupperindexpr = (List *)
-					ExecInitExpr((Expr *) aref->refupperindexpr, parent);
+					ExecInitExprMutator((Expr *) aref->refupperindexpr, context);
 				astate->reflowerindexpr = (List *)
-					ExecInitExpr((Expr *) aref->reflowerindexpr, parent);
-				astate->refexpr = ExecInitExpr(aref->refexpr, parent);
-				astate->refassgnexpr = ExecInitExpr(aref->refassgnexpr,
-													parent);
+					ExecInitExprMutator((Expr *) aref->reflowerindexpr, context);
+				astate->refexpr = ExecInitExprMutator(aref->refexpr, context);
+				astate->refassgnexpr =
+					ExecInitExprMutator(aref->refassgnexpr, context);
 				/* do one-time catalog lookups for type info */
 				astate->refattrlength = get_typlen(aref->refarraytype);
 				get_typlenbyvalalign(aref->refelemtype,
@@ -4552,7 +4579,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 
 				fstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalFunc;
 				fstate->args = (List *)
-					ExecInitExpr((Expr *) funcexpr->args, parent);
+					ExecInitExprMutator((Expr *) funcexpr->args, context);
 				fstate->func.fn_oid = InvalidOid;		/* not initialized */
 				state = (ExprState *) fstate;
 			}
@@ -4564,7 +4591,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 
 				fstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalOper;
 				fstate->args = (List *)
-					ExecInitExpr((Expr *) opexpr->args, parent);
+					ExecInitExprMutator((Expr *) opexpr->args, context);
 				fstate->func.fn_oid = InvalidOid;		/* not initialized */
 				state = (ExprState *) fstate;
 			}
@@ -4576,7 +4603,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 
 				fstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalDistinct;
 				fstate->args = (List *)
-					ExecInitExpr((Expr *) distinctexpr->args, parent);
+					ExecInitExprMutator((Expr *) distinctexpr->args, context);
 				fstate->func.fn_oid = InvalidOid;		/* not initialized */
 				state = (ExprState *) fstate;
 			}
@@ -4588,7 +4615,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 
 				fstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalNullIf;
 				fstate->args = (List *)
-					ExecInitExpr((Expr *) nullifexpr->args, parent);
+					ExecInitExprMutator((Expr *) nullifexpr->args, context);
 				fstate->func.fn_oid = InvalidOid;		/* not initialized */
 				state = (ExprState *) fstate;
 			}
@@ -4600,7 +4627,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 
 				sstate->fxprstate.xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalScalarArrayOp;
 				sstate->fxprstate.args = (List *)
-					ExecInitExpr((Expr *) opexpr->args, parent);
+					ExecInitExprMutator((Expr *) opexpr->args, context);
 				sstate->fxprstate.func.fn_oid = InvalidOid;		/* not initialized */
 				sstate->element_type = InvalidOid;		/* ditto */
 				state = (ExprState *) sstate;
@@ -4628,7 +4655,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 						break;
 				}
 				bstate->args = (List *)
-					ExecInitExpr((Expr *) boolexpr->args, parent);
+					ExecInitExprMutator((Expr *) boolexpr->args, context);
 				state = (ExprState *) bstate;
 			}
 			break;
@@ -4637,13 +4664,14 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				SubPlan    *subplan = (SubPlan *) node;
 				SubPlanState *sstate;
 
-				if (!parent)
+				if (!context->parent)
 					elog(ERROR, "SubPlan found with no parent plan");
 
-				sstate = ExecInitSubPlan(subplan, parent);
+				sstate = ExecInitSubPlan(subplan, context->parent);
 
 				/* Add SubPlanState nodes to parent->subPlan */
-				parent->subPlan = lappend(parent->subPlan, sstate);
+				context->parent->subPlan = lappend(context->parent->subPlan,
+												   sstate);
 
 				state = (ExprState *) sstate;
 			}
@@ -4653,10 +4681,10 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				AlternativeSubPlan *asplan = (AlternativeSubPlan *) node;
 				AlternativeSubPlanState *asstate;
 
-				if (!parent)
+				if (!context->parent)
 					elog(ERROR, "AlternativeSubPlan found with no parent plan");
 
-				asstate = ExecInitAlternativeSubPlan(asplan, parent);
+				asstate = ExecInitAlternativeSubPlan(asplan, context->parent);
 
 				state = (ExprState *) asstate;
 			}
@@ -4667,7 +4695,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				FieldSelectState *fstate = makeNode(FieldSelectState);
 
 				fstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalFieldSelect;
-				fstate->arg = ExecInitExpr(fselect->arg, parent);
+				fstate->arg = ExecInitExprMutator(fselect->arg, context);
 				fstate->argdesc = NULL;
 				state = (ExprState *) fstate;
 			}
@@ -4678,8 +4706,9 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				FieldStoreState *fstate = makeNode(FieldStoreState);
 
 				fstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalFieldStore;
-				fstate->arg = ExecInitExpr(fstore->arg, parent);
-				fstate->newvals = (List *) ExecInitExpr((Expr *) fstore->newvals, parent);
+				fstate->arg = ExecInitExprMutator(fstore->arg, context);
+				fstate->newvals = (List *)
+					ExecInitExprMutator((Expr *) fstore->newvals, context);
 				fstate->argdesc = NULL;
 				state = (ExprState *) fstate;
 			}
@@ -4690,7 +4719,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				GenericExprState *gstate = makeNode(GenericExprState);
 
 				gstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalRelabelType;
-				gstate->arg = ExecInitExpr(relabel->arg, parent);
+				gstate->arg = ExecInitExprMutator(relabel->arg, context);
 				state = (ExprState *) gstate;
 			}
 			break;
@@ -4702,7 +4731,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				bool		typisvarlena;
 
 				iostate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCoerceViaIO;
-				iostate->arg = ExecInitExpr(iocoerce->arg, parent);
+				iostate->arg = ExecInitExprMutator(iocoerce->arg, context);
 				/* lookup the result type's input function */
 				getTypeInputInfo(iocoerce->resulttype, &iofunc,
 								 &iostate->intypioparam);
@@ -4720,7 +4749,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				ArrayCoerceExprState *astate = makeNode(ArrayCoerceExprState);
 
 				astate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalArrayCoerceExpr;
-				astate->arg = ExecInitExpr(acoerce->arg, parent);
+				astate->arg = ExecInitExprMutator(acoerce->arg, context);
 				astate->resultelemtype = get_element_type(acoerce->resulttype);
 				if (astate->resultelemtype == InvalidOid)
 					ereport(ERROR,
@@ -4740,7 +4769,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				ConvertRowtypeExprState *cstate = makeNode(ConvertRowtypeExprState);
 
 				cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalConvertRowtype;
-				cstate->arg = ExecInitExpr(convert->arg, parent);
+				cstate->arg = ExecInitExprMutator(convert->arg, context);
 				state = (ExprState *) cstate;
 			}
 			break;
@@ -4752,7 +4781,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				ListCell   *l;
 
 				cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCase;
-				cstate->arg = ExecInitExpr(caseexpr->arg, parent);
+				cstate->arg = ExecInitExprMutator(caseexpr->arg, context);
 				foreach(l, caseexpr->args)
 				{
 					CaseWhen   *when = (CaseWhen *) lfirst(l);
@@ -4761,12 +4790,13 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					Assert(IsA(when, CaseWhen));
 					wstate->xprstate.evalfunc = NULL;	/* not used */
 					wstate->xprstate.expr = (Expr *) when;
-					wstate->expr = ExecInitExpr(when->expr, parent);
-					wstate->result = ExecInitExpr(when->result, parent);
+					wstate->expr = ExecInitExprMutator(when->expr, context);
+					wstate->result = ExecInitExprMutator(when->result, context);
 					outlist = lappend(outlist, wstate);
 				}
 				cstate->args = outlist;
-				cstate->defresult = ExecInitExpr(caseexpr->defresult, parent);
+				cstate->defresult =
+					ExecInitExprMutator(caseexpr->defresult, context);
 				state = (ExprState *) cstate;
 			}
 			break;
@@ -4783,7 +4813,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					Expr	   *e = (Expr *) lfirst(l);
 					ExprState  *estate;
 
-					estate = ExecInitExpr(e, parent);
+					estate = ExecInitExprMutator(e, context);
 					outlist = lappend(outlist, estate);
 				}
 				astate->elements = outlist;
@@ -4852,7 +4882,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 						 */
 						e = (Expr *) makeNullConst(INT4OID, -1, InvalidOid);
 					}
-					estate = ExecInitExpr(e, parent);
+					estate = ExecInitExprMutator(e, context);
 					outlist = lappend(outlist, estate);
 					i++;
 				}
@@ -4879,7 +4909,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					Expr	   *e = (Expr *) lfirst(l);
 					ExprState  *estate;
 
-					estate = ExecInitExpr(e, parent);
+					estate = ExecInitExprMutator(e, context);
 					outlist = lappend(outlist, estate);
 				}
 				rstate->largs = outlist;
@@ -4890,7 +4920,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					Expr	   *e = (Expr *) lfirst(l);
 					ExprState  *estate;
 
-					estate = ExecInitExpr(e, parent);
+					estate = ExecInitExprMutator(e, context);
 					outlist = lappend(outlist, estate);
 				}
 				rstate->rargs = outlist;
@@ -4943,7 +4973,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					Expr	   *e = (Expr *) lfirst(l);
 					ExprState  *estate;
 
-					estate = ExecInitExpr(e, parent);
+					estate = ExecInitExprMutator(e, context);
 					outlist = lappend(outlist, estate);
 				}
 				cstate->args = outlist;
@@ -4964,7 +4994,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					Expr	   *e = (Expr *) lfirst(l);
 					ExprState  *estate;
 
-					estate = ExecInitExpr(e, parent);
+					estate = ExecInitExprMutator(e, context);
 					outlist = lappend(outlist, estate);
 				}
 				mstate->args = outlist;
@@ -5001,7 +5031,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					Expr	   *e = (Expr *) lfirst(arg);
 					ExprState  *estate;
 
-					estate = ExecInitExpr(e, parent);
+					estate = ExecInitExprMutator(e, context);
 					outlist = lappend(outlist, estate);
 				}
 				xstate->named_args = outlist;
@@ -5012,7 +5042,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					Expr	   *e = (Expr *) lfirst(arg);
 					ExprState  *estate;
 
-					estate = ExecInitExpr(e, parent);
+					estate = ExecInitExprMutator(e, context);
 					outlist = lappend(outlist, estate);
 				}
 				xstate->args = outlist;
@@ -5026,7 +5056,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				NullTestState *nstate = makeNode(NullTestState);
 
 				nstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalNullTest;
-				nstate->arg = ExecInitExpr(ntest->arg, parent);
+				nstate->arg = ExecInitExprMutator(ntest->arg, context);
 				nstate->argdesc = NULL;
 				state = (ExprState *) nstate;
 			}
@@ -5037,7 +5067,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				GenericExprState *gstate = makeNode(GenericExprState);
 
 				gstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalBooleanTest;
-				gstate->arg = ExecInitExpr(btest->arg, parent);
+				gstate->arg = ExecInitExprMutator(btest->arg, context);
 				state = (ExprState *) gstate;
 			}
 			break;
@@ -5047,16 +5077,13 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				CacheExprState *cstate = makeNode(CacheExprState);
 
 				cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCacheExpr;
-				cstate->subexpr = ExecInitExpr(cache->arg, parent);
+				cstate->arg = ExecInitExprMutator(cache->arg, context);
 				/*
-				 * We only enable cache when there's an associated PlanState.
-				 * For other callers we can't guarantee the
-				 * lifetime/invalidation of the cache.
+				 * If useCache=false, in theory we could simply skip creating
+				 * the CacheExprState node in the first place, but that might
+				 * be surprising to future developers.
 				 */
-				if (parent)
-					cstate->cacheEnabled = true;
-				else
-					cstate->cacheEnabled = false;
+				cstate->enabled = context->useCache;
 
 				state = (ExprState *) cstate;
 			}
@@ -5067,7 +5094,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				CoerceToDomainState *cstate = makeNode(CoerceToDomainState);
 
 				cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCoerceToDomain;
-				cstate->arg = ExecInitExpr(ctest->arg, parent);
+				cstate->arg = ExecInitExprMutator(ctest->arg, context);
 				cstate->constraints = GetDomainConstraints(ctest->resulttype);
 				state = (ExprState *) cstate;
 			}
@@ -5082,7 +5109,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				GenericExprState *gstate = makeNode(GenericExprState);
 
 				gstate->xprstate.evalfunc = NULL;		/* not used */
-				gstate->arg = ExecInitExpr(tle->expr, parent);
+				gstate->arg = ExecInitExprMutator(tle->expr, context);
 				state = (ExprState *) gstate;
 			}
 			break;
@@ -5094,8 +5121,8 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				foreach(l, (List *) node)
 				{
 					outlist = lappend(outlist,
-									  ExecInitExpr((Expr *) lfirst(l),
-												   parent));
+									  ExecInitExprMutator((Expr *) lfirst(l),
+											  	  	  	  context));
 				}
 				/* Don't fall through to the "common" code below */
 				return (ExprState *) outlist;
