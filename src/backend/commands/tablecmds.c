@@ -3660,7 +3660,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 		NewColumnValue *ex = lfirst(l);
 
 		/* expr already planned */
-		ex->exprstate = ExecInitExpr((Expr *) ex->expr, NULL);
+		ex->exprstate = ExecInitExpr((Expr *) ex->expr, NULL, true);
 	}
 
 	notnull_attrs = NIL;
