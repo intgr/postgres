@@ -683,9 +683,9 @@ typedef struct FuncExprState
 typedef struct CacheExprState
 {
 	ExprState	xprstate;
-	ExprState  *subexpr;	/* state of sub-expression */
+	ExprState  *arg;		/* state of sub-expression */
 
-	bool		cacheEnabled;
+	bool		enabled;	/* is cache enabled? */
 	Datum		result;		/* cached result */
 	bool		isNull;		/* is result NULL? */
 } CacheExprState;
