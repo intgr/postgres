@@ -464,17 +464,21 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 	 */
 	hjstate->js.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->join.plan.targetlist,
-					 (PlanState *) hjstate);
+					 (PlanState *) hjstate,
+					 true);
 	hjstate->js.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->join.plan.qual,
-					 (PlanState *) hjstate);
+					 (PlanState *) hjstate,
+					 true);
 	hjstate->js.jointype = node->join.jointype;
 	hjstate->js.joinqual = (List *)
 		ExecInitExpr((Expr *) node->join.joinqual,
-					 (PlanState *) hjstate);
+					 (PlanState *) hjstate,
+					 true);
 	hjstate->hashclauses = (List *)
 		ExecInitExpr((Expr *) node->hashclauses,
-					 (PlanState *) hjstate);
+					 (PlanState *) hjstate,
+					 true);
 
 	/*
 	 * initialize child nodes

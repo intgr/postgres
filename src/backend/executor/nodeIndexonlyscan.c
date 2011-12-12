@@ -393,13 +393,16 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	 */
 	indexstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) indexstate);
+					 (PlanState *) indexstate,
+					 true);
 	indexstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) indexstate);
+					 (PlanState *) indexstate,
+					 true);
 	indexstate->indexqual = (List *)
 		ExecInitExpr((Expr *) node->indexqual,
-					 (PlanState *) indexstate);
+					 (PlanState *) indexstate,
+					 true);
 
 	/*
 	 * tuple table initialization

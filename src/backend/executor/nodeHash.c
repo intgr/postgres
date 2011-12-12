@@ -180,10 +180,12 @@ ExecInitHash(Hash *node, EState *estate, int eflags)
 	 */
 	hashstate->ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) hashstate);
+					 (PlanState *) hashstate,
+					 true);
 	hashstate->ps.qual = (List *)
 		ExecInitExpr((Expr *) node->plan.qual,
-					 (PlanState *) hashstate);
+					 (PlanState *) hashstate,
+					 true);
 
 	/*
 	 * initialize child nodes

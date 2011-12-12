@@ -1160,7 +1160,7 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 			List	   *rlist = (List *) lfirst(l);
 			List	   *rliststate;
 
-			rliststate = (List *) ExecInitExpr((Expr *) rlist, &mtstate->ps);
+			rliststate = (List *) ExecInitExpr((Expr *) rlist, &mtstate->ps, true);
 			resultRelInfo->ri_projectReturning =
 				ExecBuildProjectionInfo(rliststate, econtext, slot,
 									 resultRelInfo->ri_RelationDesc->rd_att);

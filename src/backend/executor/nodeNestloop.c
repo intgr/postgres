@@ -322,14 +322,17 @@ ExecInitNestLoop(NestLoop *node, EState *estate, int eflags)
 	 */
 	nlstate->js.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->join.plan.targetlist,
-					 (PlanState *) nlstate);
+					 (PlanState *) nlstate,
+					 true);
 	nlstate->js.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->join.plan.qual,
-					 (PlanState *) nlstate);
+					 (PlanState *) nlstate,
+					 true);
 	nlstate->js.jointype = node->join.jointype;
 	nlstate->js.joinqual = (List *)
 		ExecInitExpr((Expr *) node->join.joinqual,
-					 (PlanState *) nlstate);
+					 (PlanState *) nlstate,
+					 true);
 
 	/*
 	 * initialize child nodes

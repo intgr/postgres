@@ -1446,10 +1446,12 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 	 */
 	aggstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) aggstate);
+					 (PlanState *) aggstate,
+					 true);
 	aggstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->plan.qual,
-					 (PlanState *) aggstate);
+					 (PlanState *) aggstate,
+					 true);
 
 	/*
 	 * initialize child nodes

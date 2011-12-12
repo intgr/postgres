@@ -494,13 +494,16 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
 	 */
 	indexstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) indexstate);
+					 (PlanState *) indexstate,
+					 true);
 	indexstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) indexstate);
+					 (PlanState *) indexstate,
+					 true);
 	indexstate->indexqualorig = (List *)
 		ExecInitExpr((Expr *) node->indexqualorig,
-					 (PlanState *) indexstate);
+					 (PlanState *) indexstate,
+					 true);
 
 	/*
 	 * tuple table initialization
@@ -817,7 +820,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 				}
 				runtime_keys[n_runtime_keys].scan_key = this_scan_key;
 				runtime_keys[n_runtime_keys].key_expr =
-					ExecInitExpr(rightop, planstate);
+					ExecInitExpr(rightop, planstate, true);
 				runtime_keys[n_runtime_keys].key_toastable =
 					TypeIsToastable(op_righttype);
 				n_runtime_keys++;
@@ -944,7 +947,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 					}
 					runtime_keys[n_runtime_keys].scan_key = this_sub_key;
 					runtime_keys[n_runtime_keys].key_expr =
-						ExecInitExpr(rightop, planstate);
+						ExecInitExpr(rightop, planstate, true);
 					runtime_keys[n_runtime_keys].key_toastable =
 						TypeIsToastable(op_righttype);
 					n_runtime_keys++;
@@ -1062,7 +1065,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 					}
 					runtime_keys[n_runtime_keys].scan_key = this_scan_key;
 					runtime_keys[n_runtime_keys].key_expr =
-						ExecInitExpr(rightop, planstate);
+						ExecInitExpr(rightop, planstate, true);
 
 					/*
 					 * Careful here: the runtime expression is not of
@@ -1080,7 +1083,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 				/* Executor has to expand the array value */
 				array_keys[n_array_keys].scan_key = this_scan_key;
 				array_keys[n_array_keys].array_expr =
-					ExecInitExpr(rightop, planstate);
+					ExecInitExpr(rightop, planstate, true);
 				/* the remaining fields were zeroed by palloc0 */
 				n_array_keys++;
 				scanvalue = (Datum) 0;

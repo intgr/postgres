@@ -153,10 +153,12 @@ ExecInitFunctionScan(FunctionScan *node, EState *estate, int eflags)
 	 */
 	scanstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) scanstate);
+					 (PlanState *) scanstate,
+					 true);
 	scanstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) scanstate);
+					 (PlanState *) scanstate,
+					 true);
 
 	/*
 	 * Now determine if the function returns a simple or composite type, and
@@ -217,7 +219,8 @@ ExecInitFunctionScan(FunctionScan *node, EState *estate, int eflags)
 	 */
 	scanstate->tuplestorestate = NULL;
 	scanstate->funcexpr = ExecInitExpr((Expr *) node->funcexpr,
-									   (PlanState *) scanstate);
+									   (PlanState *) scanstate,
+									   true);
 
 	scanstate->ss.ps.ps_TupFromTlist = false;
 

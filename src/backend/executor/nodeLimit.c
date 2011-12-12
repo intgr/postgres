@@ -399,9 +399,11 @@ ExecInitLimit(Limit *node, EState *estate, int eflags)
 	 * initialize child expressions
 	 */
 	limitstate->limitOffset = ExecInitExpr((Expr *) node->limitOffset,
-										   (PlanState *) limitstate);
+										   (PlanState *) limitstate,
+										   true);
 	limitstate->limitCount = ExecInitExpr((Expr *) node->limitCount,
-										  (PlanState *) limitstate);
+										  (PlanState *) limitstate,
+										  true);
 
 	/*
 	 * Tuple table initialization (XXX not actually used...)

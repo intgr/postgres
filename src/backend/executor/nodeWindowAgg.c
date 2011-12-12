@@ -1457,7 +1457,8 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 
 	winstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) winstate);
+					 (PlanState *) winstate,
+					 true);
 
 	/*
 	 * WindowAgg nodes never have quals, since they can only occur at the
@@ -1625,9 +1626,11 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 
 	/* initialize frame bound offset expressions */
 	winstate->startOffset = ExecInitExpr((Expr *) node->startOffset,
-										 (PlanState *) winstate);
+										 (PlanState *) winstate,
+										 true);
 	winstate->endOffset = ExecInitExpr((Expr *) node->endOffset,
-									   (PlanState *) winstate);
+									   (PlanState *) winstate,
+									   true);
 
 	winstate->all_first = true;
 	winstate->partition_spooled = false;
