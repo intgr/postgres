@@ -47,10 +47,13 @@ explain (costs off)
   select * from test2 where t like '%BCD%';
 explain (costs off)
   select * from test2 where t ilike '%BCD%';
+explain (costs off)
+  select * from test2 where t like any ('{%bcd%,qua%}');
 select * from test2 where t like '%BCD%';
 select * from test2 where t like '%bcd%';
 select * from test2 where t ilike '%BCD%';
 select * from test2 where t ilike 'qua%';
+select * from test2 where t like any ('{%bcd%,qua%}');
 drop index test2_idx_gin;
 create index test2_idx_gist on test2 using gist (t gist_trgm_ops);
 set enable_seqscan=off;
@@ -58,7 +61,10 @@ explain (costs off)
   select * from test2 where t like '%BCD%';
 explain (costs off)
   select * from test2 where t ilike '%BCD%';
+explain (costs off)
+  select * from test2 where t like any ('{%bcd%,qua%}');
 select * from test2 where t like '%BCD%';
 select * from test2 where t like '%bcd%';
 select * from test2 where t ilike '%BCD%';
 select * from test2 where t ilike 'qua%';
+select * from test2 where t like any ('{%bcd%,qua%}');

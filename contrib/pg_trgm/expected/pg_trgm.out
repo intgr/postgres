@@ -3486,6 +3486,16 @@ explain (costs off)
          Index Cond: (t ~~* '%BCD%'::text)
 (4 rows)
 
+explain (costs off)
+  select * from test2 where t like any ('{%bcd%,qua%}');
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Bitmap Heap Scan on test2
+   Recheck Cond: (t ~~ ANY ('{%bcd%,qua%}'::text[]))
+   ->  Bitmap Index Scan on test2_idx_gin
+         Index Cond: (t ~~ ANY ('{%bcd%,qua%}'::text[]))
+(4 rows)
+
 select * from test2 where t like '%BCD%';
  t 
 ---
@@ -3508,6 +3518,13 @@ select * from test2 where t ilike 'qua%';
 -------
  quark
 (1 row)
+
+select * from test2 where t like any ('{%bcd%,qua%}');
+   t    
+--------
+ abcdef
+ quark
+(2 rows)
 
 drop index test2_idx_gin;
 create index test2_idx_gist on test2 using gist (t gist_trgm_ops);
@@ -3528,6 +3545,16 @@ explain (costs off)
    Index Cond: (t ~~* '%BCD%'::text)
 (2 rows)
 
+explain (costs off)
+  select * from test2 where t like any ('{%bcd%,qua%}');
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Bitmap Heap Scan on test2
+   Recheck Cond: (t ~~ ANY ('{%bcd%,qua%}'::text[]))
+   ->  Bitmap Index Scan on test2_idx_gist
+         Index Cond: (t ~~ ANY ('{%bcd%,qua%}'::text[]))
+(4 rows)
+
 select * from test2 where t like '%BCD%';
  t 
 ---
@@ -3550,4 +3577,11 @@ select * from test2 where t ilike 'qua%';
 -------
  quark
 (1 row)
+
+select * from test2 where t like any ('{%bcd%,qua%}');
+   t    
+--------
+ abcdef
+ quark
+(2 rows)
 

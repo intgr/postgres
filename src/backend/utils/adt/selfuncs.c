@@ -6591,6 +6591,67 @@ find_index_column(Node *op, IndexOptInfo *index)
 }
 
 /*
+ * Estimate gin costs for a single search value. Returns false if no match
+ * is possible, true otherwise.
+ */
+static void
+gin_costestimate_search(Oid extractProcOid, Datum value, int strategy_op,
+						double *partialEntriesInQuals,
+						double *exactEntriesInQuals,
+						double *searchEntriesInQuals, bool *haveFullScan,
+						bool *matchPossible)
+{
+	int32		nentries = 0;
+	bool	   *partial_matches = NULL;
+	Pointer    *extra_data = NULL;
+	bool	   *nullFlags = NULL;
+	int32		searchMode = GIN_SEARCH_MODE_DEFAULT;
+	int32		i;
+
+	OidFunctionCall7(extractProcOid,
+					 value,
+					 PointerGetDatum(&nentries),
+					 UInt16GetDatum(strategy_op),
+					 PointerGetDatum(&partial_matches),
+					 PointerGetDatum(&extra_data),
+					 PointerGetDatum(&nullFlags),
+					 PointerGetDatum(&searchMode));
+
+	if (nentries <= 0 && searchMode == GIN_SEARCH_MODE_DEFAULT)
+	{
+		*matchPossible = false;
+		return;
+	}
+
+	for (i = 0; i < nentries; i++)
+	{
+		/*
+		 * For partial match we haven't any information to estimate
+		 * number of matched entries in index, so, we just estimate it
+		 * as 100
+		 */
+		if (partial_matches && partial_matches[i])
+			*partialEntriesInQuals += 100;
+		else
+			(*exactEntriesInQuals)++;
+
+		(*searchEntriesInQuals)++;
+	}
+
+	if (searchMode == GIN_SEARCH_MODE_INCLUDE_EMPTY)
+	{
+		/* Treat "include empty" like an exact-match item */
+		(*exactEntriesInQuals)++;
+		(*searchEntriesInQuals)++;
+	}
+	else if (searchMode != GIN_SEARCH_MODE_DEFAULT)
+	{
+		/* It's GIN_SEARCH_MODE_ALL */
+		*haveFullScan = true;
+	}
+}
+
+/*
  * GIN has search behavior completely different from other index types
  */
 Datum
@@ -6613,7 +6674,8 @@ gincostestimate(PG_FUNCTION_ARGS)
 				numDataPages,
 				numPendingPages,
 				numEntries;
-	bool		haveFullScan = false;
+	bool		haveFullScan = false,
+				matchPossible = true;
 	double		partialEntriesInQuals = 0.0;
 	double		searchEntriesInQuals = 0.0;
 	double		exactEntriesInQuals = 0.0;
@@ -6721,19 +6783,31 @@ gincostestimate(PG_FUNCTION_ARGS)
 		int			strategy_op;
 		Oid			lefttype,
 					righttype;
-		int32		nentries = 0;
-		bool	   *partial_matches = NULL;
-		Pointer    *extra_data = NULL;
-		bool	   *nullFlags = NULL;
-		int32		searchMode = GIN_SEARCH_MODE_DEFAULT;
 		int			indexcol;
 
 		Assert(IsA(rinfo, RestrictInfo));
 		clause = rinfo->clause;
-		Assert(IsA(clause, OpExpr));
-		leftop = get_leftop(clause);
-		rightop = get_rightop(clause);
-		clause_op = ((OpExpr *) clause)->opno;
+
+		if (IsA(clause, OpExpr))
+		{
+			leftop = get_leftop(clause);
+			rightop = get_rightop(clause);
+			clause_op = ((OpExpr *) clause)->opno;
+		}
+		else if (IsA(clause, ScalarArrayOpExpr))
+		{
+			ScalarArrayOpExpr *saop = (ScalarArrayOpExpr *) clause;
+
+			leftop = (Node *) linitial(saop->args);
+			rightop = (Node *) lsecond(saop->args);
+			clause_op = saop->opno;
+		}
+		else
+		{
+			elog(ERROR, "unsupported GIN indexqual type: %d",
+				 (int) nodeTag(clause));
+			continue;			/* keep compiler quiet */
+		}
 
 		if ((indexcol = find_index_column(leftop, index)) >= 0)
 		{
@@ -6760,17 +6834,20 @@ gincostestimate(PG_FUNCTION_ARGS)
 		 */
 		if (!IsA(operand, Const))
 		{
-			searchEntriesInQuals++;
+			if (IsA(rinfo->clause, OpExpr))
+				searchEntriesInQuals++;
+
+			else if (IsA(rinfo->clause, ScalarArrayOpExpr))
+				searchEntriesInQuals += estimate_array_length(operand);
+
 			continue;
 		}
 
 		/* If Const is null, there can be no matches */
 		if (((Const *) operand)->constisnull)
 		{
-			*indexStartupCost = 0;
-			*indexTotalCost = 0;
-			*indexSelectivity = 0;
-			PG_RETURN_VOID();
+			matchPossible = false;
+			break;
 		}
 
 		/*
@@ -6800,54 +6877,78 @@ gincostestimate(PG_FUNCTION_ARGS)
 				 get_rel_name(index->indexoid));
 		}
 
-		OidFunctionCall7(extractProcOid,
-						 ((Const *) operand)->constvalue,
-						 PointerGetDatum(&nentries),
-						 UInt16GetDatum(strategy_op),
-						 PointerGetDatum(&partial_matches),
-						 PointerGetDatum(&extra_data),
-						 PointerGetDatum(&nullFlags),
-						 PointerGetDatum(&searchMode));
-
-		if (nentries <= 0 && searchMode == GIN_SEARCH_MODE_DEFAULT)
+		if (IsA(rinfo->clause, OpExpr))
 		{
-			/* No match is possible */
-			*indexStartupCost = 0;
-			*indexTotalCost = 0;
-			*indexSelectivity = 0;
-			PG_RETURN_VOID();
+			gin_costestimate_search(extractProcOid,
+									((Const *) operand)->constvalue,
+									strategy_op,
+									&partialEntriesInQuals,
+									&exactEntriesInQuals,
+									&searchEntriesInQuals,
+									&haveFullScan,
+									&matchPossible);
+			if (!matchPossible)
+				break;
 		}
-		else
+		else if (IsA(rinfo->clause, ScalarArrayOpExpr))
 		{
-			int32		i;
+			/*
+			 * Walk through all array elements and sum together entry counts
+			 */
+			ArrayType  *arrayval;
+			int16		elmlen;
+			bool		elmbyval;
+			char		elmalign;
+			int			num_elems;
+			Datum	   *elem_values;
+			bool	   *elem_nulls;
+			bool		elem_possible;
+			int			i;
 
-			for (i = 0; i < nentries; i++)
+			arrayval = DatumGetArrayTypeP(((Const *) operand)->constvalue);
+			get_typlenbyvalalign(ARR_ELEMTYPE(arrayval),
+								 &elmlen, &elmbyval, &elmalign);
+			deconstruct_array(arrayval,
+							  ARR_ELEMTYPE(arrayval),
+							  elmlen, elmbyval, elmalign,
+							  &elem_values, &elem_nulls, &num_elems);
+
+			matchPossible = false;
+			for (i = 0; i < num_elems; i++)
 			{
-				/*
-				 * For partial match we haven't any information to estimate
-				 * number of matched entries in index, so, we just estimate it
-				 * as 100
-				 */
-				if (partial_matches && partial_matches[i])
-					partialEntriesInQuals += 100;
-				else
-					exactEntriesInQuals++;
+				/* NULL can't match anything */
+				if (elem_nulls[i])
+					continue;
 
-				searchEntriesInQuals++;
+				gin_costestimate_search(extractProcOid,
+										elem_values[i],
+										strategy_op,
+										&partialEntriesInQuals,
+										&exactEntriesInQuals,
+										&searchEntriesInQuals,
+										&haveFullScan,
+										&elem_possible);
+
+				if (elem_possible)
+					matchPossible = true;
 			}
-		}
 
-		if (searchMode == GIN_SEARCH_MODE_INCLUDE_EMPTY)
-		{
-			/* Treat "include empty" like an exact-match item */
-			exactEntriesInQuals++;
-			searchEntriesInQuals++;
+			/*
+			 * There were no matching searches in the array, no point in
+			 * looking at other clauses
+			 */
+			if(!matchPossible)
+				break;
 		}
-		else if (searchMode != GIN_SEARCH_MODE_DEFAULT)
-		{
-			/* It's GIN_SEARCH_MODE_ALL */
-			haveFullScan = true;
-		}
+	}
+
+	if (!matchPossible)
+	{
+		/* No match is possible */
+		*indexStartupCost = 0;
+		*indexTotalCost = 0;
+		*indexSelectivity = 0;
+		PG_RETURN_VOID();
 	}
 
 	if (haveFullScan || indexQuals == NIL)
