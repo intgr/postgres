@@ -6592,14 +6592,14 @@ find_index_column(Node *op, IndexOptInfo *index)
 
 /*
  * Estimate gin costs for a single search value. Returns false if no match
- * is possible, true otherwise.
+ * is possible, true otherwise. All pointer arguments must be initialized by
+ * the caller.
  */
-static void
+static bool
 gin_costestimate_search(Oid extractProcOid, Datum value, int strategy_op,
-						double *partialEntriesInQuals,
+						double numEntries, double *partialEntriesInQuals,
 						double *exactEntriesInQuals,
-						double *searchEntriesInQuals, bool *haveFullScan,
-						bool *matchPossible)
+						double *searchEntriesInQuals, bool *haveFullScan)
 {
 	int32		nentries = 0;
 	bool	   *partial_matches = NULL;
@@ -6618,10 +6618,7 @@ gin_costestimate_search(Oid extractProcOid, Datum value, int strategy_op,
 					 PointerGetDatum(&searchMode));
 
 	if (nentries <= 0 && searchMode == GIN_SEARCH_MODE_DEFAULT)
-	{
-		*matchPossible = false;
-		return;
-	}
+		return false;
 
 	for (i = 0; i < nentries; i++)
 	{
@@ -6646,9 +6643,15 @@ gin_costestimate_search(Oid extractProcOid, Datum value, int strategy_op,
 	}
 	else if (searchMode != GIN_SEARCH_MODE_DEFAULT)
 	{
-		/* It's GIN_SEARCH_MODE_ALL */
-		*haveFullScan = true;
+		/*
+		 * It's GIN_SEARCH_MODE_ALL, full index scan will be required.  We
+		 * treat this as if every key in the index had been listed in the
+		 * query; is that reasonable?
+		 */
+		*searchEntriesInQuals += numEntries;
 	}
+
+	return true;
 }
 
 /*
@@ -6685,7 +6688,8 @@ gincostestimate(PG_FUNCTION_ARGS)
 	double		qual_op_cost,
 				qual_arg_cost,
 				spc_random_page_cost,
-				num_scans;
+				outer_scans,
+				array_scans = 1.0;
 	QualCost	index_qual_cost;
 	Relation	indexRel;
 	GinStatsData ginStats;
@@ -6834,11 +6838,10 @@ gincostestimate(PG_FUNCTION_ARGS)
 		 */
 		if (!IsA(operand, Const))
 		{
-			if (IsA(rinfo->clause, OpExpr))
-				searchEntriesInQuals++;
+			searchEntriesInQuals++;
 
-			else if (IsA(rinfo->clause, ScalarArrayOpExpr))
-				searchEntriesInQuals += estimate_array_length(operand);
+			if (IsA(rinfo->clause, ScalarArrayOpExpr))
+				array_scans *= estimate_array_length(operand);
 
 			continue;
 		}
@@ -6879,31 +6882,32 @@ gincostestimate(PG_FUNCTION_ARGS)
 
 		if (IsA(rinfo->clause, OpExpr))
 		{
-			gin_costestimate_search(extractProcOid,
-									((Const *) operand)->constvalue,
-									strategy_op,
-									&partialEntriesInQuals,
-									&exactEntriesInQuals,
-									&searchEntriesInQuals,
-									&haveFullScan,
-									&matchPossible);
+			matchPossible =
+				gin_costestimate_search(extractProcOid,
+										((Const *) operand)->constvalue,
+										strategy_op,
+										numEntries,
+										&partialEntriesInQuals,
+										&exactEntriesInQuals,
+										&searchEntriesInQuals,
+										&haveFullScan);
 			if (!matchPossible)
 				break;
 		}
 		else if (IsA(rinfo->clause, ScalarArrayOpExpr))
 		{
-			/*
-			 * Walk through all array elements and sum together entry counts
-			 */
 			ArrayType  *arrayval;
 			int16		elmlen;
 			bool		elmbyval;
 			char		elmalign;
-			int			num_elems;
-			Datum	   *elem_values;
-			bool	   *elem_nulls;
-			bool		elem_possible;
+			int			numElems;
+			Datum	   *elemValues;
+			bool	   *elemNulls;
+			int			numPossible = 0;
 			int			i;
+			double		partialEntries = 0.0,
+						exactEntries = 0.0,
+						searchEntries = 0.0;
 
 			arrayval = DatumGetArrayTypeP(((Const *) operand)->constvalue);
 			get_typlenbyvalalign(ARR_ELEMTYPE(arrayval),
@@ -6911,34 +6915,54 @@ gincostestimate(PG_FUNCTION_ARGS)
 			deconstruct_array(arrayval,
 							  ARR_ELEMTYPE(arrayval),
 							  elmlen, elmbyval, elmalign,
-							  &elem_values, &elem_nulls, &num_elems);
+							  &elemValues, &elemNulls, &numElems);
 
-			matchPossible = false;
-			for (i = 0; i < num_elems; i++)
+			for (i = 0; i < numElems; i++)
 			{
+				bool		elemMatchPossible;
+
 				/* NULL can't match anything */
-				if (elem_nulls[i])
+				if (elemNulls[i])
 					continue;
 
-				gin_costestimate_search(extractProcOid,
-										elem_values[i],
-										strategy_op,
-										&partialEntriesInQuals,
-										&exactEntriesInQuals,
-										&searchEntriesInQuals,
-										&haveFullScan,
-										&elem_possible);
+				elemMatchPossible =
+					gin_costestimate_search(extractProcOid,
+											elemValues[i],
+											strategy_op,
+											numEntries,
+											&partialEntries,
+											&exactEntries,
+											&searchEntries,
+											&haveFullScan);
 
-				if (elem_possible)
-					matchPossible = true;
+				/* We only count array elements that can return any results */
+				if (elemMatchPossible)
+					numPossible++;
+			}
+
+			if (numPossible == 0)
+			{
+				/* No useful searches in the array */
+				matchPossible = false;
+				break;
 			}
 
 			/*
-			 * There were no matching searches in the array, no point in
-			 * looking at other clauses
+			 * When there are multiple scalar expressions in an index scan,
+			 * the executor repeats the index scan for all possible
+			 * combinations (cartesian product) of input arrays. Instead of
+			 * doing that here, we only do a single pass over input arrays and
+			 * calculate the average entries for each scan. That allows us to
+			 * estimate startup cost too.
+			 *
+			 * Later, we multiply average cost by array_scans (the product of
+			 * effective array lengths)
 			 */
-			if(!matchPossible)
-				break;
+			partialEntriesInQuals += partialEntries / numPossible;
+			exactEntriesInQuals   += exactEntries / numPossible;
+			searchEntriesInQuals  += searchEntries / numPossible;
+
+			array_scans *= numPossible;
 		}
 	}
 
@@ -6951,7 +6975,7 @@ gincostestimate(PG_FUNCTION_ARGS)
 		PG_RETURN_VOID();
 	}
 
-	if (haveFullScan || indexQuals == NIL)
+	if (indexQuals == NIL)
 	{
 		/*
 		 * Full index scan will be required.  We treat this as if every key in
@@ -6962,9 +6986,9 @@ gincostestimate(PG_FUNCTION_ARGS)
 
 	/* Will we have more than one iteration of a nestloop scan? */
 	if (outer_rel != NULL && outer_rel->rows > 1)
-		num_scans = outer_rel->rows;
+		outer_scans = outer_rel->rows;
 	else
-		num_scans = 1;
+		outer_scans = 1;
 
 	/*
 	 * cost to begin scan, first of all, pay attention to pending list.
@@ -6989,13 +7013,13 @@ gincostestimate(PG_FUNCTION_ARGS)
 
 	/*
 	 * Partial match algorithm reads all data pages before doing actual scan,
-	 * so it's a startup cost. Again, we havn't any useful stats here, so,
+	 * so it's a startup cost. Again, we haven't any useful stats here, so,
 	 * estimate it as proportion
 	 */
 	dataPagesFetched = ceil(numDataPages * partialEntriesInQuals / numEntries);
 
 	/* calculate cache effects */
-	if (num_scans > 1 || searchEntriesInQuals > 1)
+	if (outer_scans > 1 || array_scans > 1 || searchEntriesInQuals > 1)
 	{
 		entryPagesFetched = index_pages_fetched(entryPagesFetched,
 												(BlockNumber) numEntryPages,
@@ -7010,6 +7034,14 @@ gincostestimate(PG_FUNCTION_ARGS)
 	 * apart on disk.
 	 */
 	*indexStartupCost = (entryPagesFetched + dataPagesFetched) * spc_random_page_cost;
+
+	/*
+	 * Startup cost was estimated with per-scan averages (first scan), but
+	 * total cost needs to account for all rescans of ScalarArrayOpExprs.
+	 */
+	partialEntriesInQuals *= array_scans;
+	exactEntriesInQuals   *= array_scans;
+	searchEntriesInQuals  *= array_scans;
 
 	/* cost to scan data pages for each exact (non-partial) matched entry */
 	dataPagesFetched = ceil(numDataPages * exactEntriesInQuals / numEntries);
@@ -7033,7 +7065,7 @@ gincostestimate(PG_FUNCTION_ARGS)
 		dataPagesFetched = dataPagesFetchedBySel;
 	}
 
-	if (num_scans > 1)
+	if (outer_scans > 1 || array_scans > 1)
 		dataPagesFetched = index_pages_fetched(dataPagesFetched,
 											   (BlockNumber) numDataPages,
 											   numDataPages, root);
