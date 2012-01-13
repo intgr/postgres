@@ -3048,6 +3048,24 @@ cost_qual_eval_walker(Node *node, cost_qual_eval_context *context)
 		 */
 		return false;			/* don't recurse into children */
 	}
+	else if (IsA(node, CacheExpr))
+	{
+		cost_qual_eval_context locContext;
+		CacheExpr  *cache = (CacheExpr *) node;
+
+		locContext.root = context->root;
+		locContext.total.startup = 0;
+		locContext.total.per_tuple = 0;
+
+		cost_qual_eval_walker((Node *) cache->arg, &locContext);
+
+		/* Account all cached per-tuple costs once in the startup cost. */
+		context->total.startup +=
+			locContext.total.startup + locContext.total.per_tuple;
+
+		/* do NOT recurse into children */
+		return false;
+	}
 	else if (IsA(node, CoerceViaIO))
 	{
 		CoerceViaIO *iocoerce = (CoerceViaIO *) node;
