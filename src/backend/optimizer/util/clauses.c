@@ -2237,7 +2237,12 @@ eval_const_expressions(PlannerInfo *root, Node *node)
  *	  value of the Param.
  * 2. Fold stable, as well as immutable, functions to constants.
  * 3. Reduce PlaceHolderVar nodes to their contained expressions.
- * 4. Strip CacheExpr nodes, as planner only wants to evaluate once.
+ * 4. Strip CacheExpr nodes, as selectivity estimation functions aren't
+ *    prepared to deal with CacheExpr nodes.
+ *
+ * NOTE: This function is not indempotent. Calling it twice over an expression
+ * tree causes CacheExpr nodes to be removed in the first pass, then re-added
+ * in the 2nd pass. Make sure it only gets called once.
  *--------------------
  */
 Node *
@@ -3459,8 +3464,17 @@ const_expressions_mutator(Node *node,
 			/* Keep *cachable=true */
 			break;
 		case T_CacheExpr:
-			/* We already have CacheExpr in the appropriate place */
-			/* FALL THRU */
+			/* We already have CacheExpr in the appropriate place.
+			 * In estimation mode, strip CacheExpr nodes here to simplify
+			 * selectivity estimation functions.
+			 */
+			*cachable = false;
+			if (context->estimate)
+			{
+				CacheExpr  *cache = (CacheExpr *) node;
+				return const_expressions_mutator((Node *) cache->arg, context, cachable);
+			}
+			break;
 		default:
 			/* Everything else is not cachable */
 			*cachable = false;
