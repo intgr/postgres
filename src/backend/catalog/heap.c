@@ -787,6 +787,7 @@ InsertPgClassTuple(Relation pg_class_desc,
 	values[Anum_pg_class_relhastriggers - 1] = BoolGetDatum(rd_rel->relhastriggers);
 	values[Anum_pg_class_relhassubclass - 1] = BoolGetDatum(rd_rel->relhassubclass);
 	values[Anum_pg_class_relfrozenxid - 1] = TransactionIdGetDatum(rd_rel->relfrozenxid);
+	values[Anum_pg_class_relvalidxmin - 1] = TransactionIdGetDatum(rd_rel->relvalidxmin);
 	if (relacl != (Datum) 0)
 		values[Anum_pg_class_relacl - 1] = relacl;
 	else
@@ -884,6 +885,7 @@ AddNewRelationTuple(Relation pg_class_desc,
 		new_rel_reltup->relfrozenxid = InvalidTransactionId;
 	}
 
+	new_rel_reltup->relvalidxmin = InvalidTransactionId;
 	new_rel_reltup->relowner = relowner;
 	new_rel_reltup->reltype = new_type_oid;
 	new_rel_reltup->reloftype = reloftype;

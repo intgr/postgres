@@ -1175,6 +1175,22 @@ heap_beginscan_internal(Relation relation, Snapshot snapshot,
 	HeapScanDesc scan;
 
 	/*
+	 * If the snapshot is older than relvalidxmin then that means TRUNCATE has
+	 * removed data that we should still see. Abort rather than giving
+	 * potentially bogus results.
+	 */
+	if (relation->rd_rel->relvalidxmin != InvalidTransactionId &&
+		snapshot->xmax != InvalidTransactionId &&
+		NormalTransactionIdPrecedes(snapshot->xmax, relation->rd_rel->relvalidxmin))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+				 errmsg("canceling statement due to conflict with TRUNCATE TABLE on %s",
+						 NameStr(relation->rd_rel->relname)),
+				 errdetail("Rows visible to this transaction have been removed.")));
+	}
+
+	/*
 	 * increment relation ref count while scanning relation
 	 *
 	 * This is just to make really sure the relcache entry won't go away while

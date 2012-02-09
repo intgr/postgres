@@ -2605,7 +2605,8 @@ RelationBuildLocalRelation(const char *relname,
  * the XIDs that will be put into the new relation contents.
  */
 void
-RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid)
+RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid,
+						  TransactionId validxmin)
 {
 	Oid			newrelfilenode;
 	RelFileNodeBackend newrnode;
@@ -2673,6 +2674,10 @@ RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid)
 		classform->relallvisible = 0;
 	}
 	classform->relfrozenxid = freezeXid;
+
+	if (validxmin != InvalidTransactionId &&
+		TransactionIdPrecedes(classform->relvalidxmin, validxmin))
+		classform->relvalidxmin = validxmin;
 
 	simple_heap_update(pg_class, &tuple->t_self, tuple);
 	CatalogUpdateIndexes(pg_class, tuple);

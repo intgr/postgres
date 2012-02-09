@@ -287,7 +287,7 @@ ResetSequence(Oid seq_relid)
 	 * Create a new storage file for the sequence.	We want to keep the
 	 * sequence's relfrozenxid at 0, since it won't contain any unfrozen XIDs.
 	 */
-	RelationSetNewRelfilenode(seq_rel, InvalidTransactionId);
+	RelationSetNewRelfilenode(seq_rel, InvalidTransactionId, InvalidTransactionId);
 
 	/*
 	 * Insert the modified tuple into the new storage file.

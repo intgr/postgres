@@ -76,7 +76,8 @@ extern Relation RelationBuildLocalRelation(const char *relname,
  * Routine to manage assignment of new relfilenode to a relation
  */
 extern void RelationSetNewRelfilenode(Relation relation,
-						  TransactionId freezeXid);
+						  TransactionId freezeXid,
+						  TransactionId validxmin);
 
 /*
  * Routines for flushing/rebuilding relcache entries in various scenarios

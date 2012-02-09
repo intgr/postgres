@@ -1,0 +1,63 @@
+Parsed test spec with 2 sessions
+
+starting permutation: begin select roll trunc
+step begin: 
+  BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+  -- Force snapshot open
+  SELECT 1 AS foo FROM txid_current();
+
+foo            
+
+1              
+step select: SELECT * FROM foo;
+i              
+
+1              
+step roll: ROLLBACK;
+step trunc: TRUNCATE TABLE foo;
+
+starting permutation: begin select trunc roll
+step begin: 
+  BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+  -- Force snapshot open
+  SELECT 1 AS foo FROM txid_current();
+
+foo            
+
+1              
+step select: SELECT * FROM foo;
+i              
+
+1              
+step trunc: TRUNCATE TABLE foo; <waiting ...>
+step roll: ROLLBACK;
+step trunc: <... completed>
+
+starting permutation: begin trunc select roll
+step begin: 
+  BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+  -- Force snapshot open
+  SELECT 1 AS foo FROM txid_current();
+
+foo            
+
+1              
+step trunc: TRUNCATE TABLE foo;
+step select: SELECT * FROM foo;
+ERROR:  canceling statement due to conflict with TRUNCATE TABLE on foo
+step roll: ROLLBACK;
+
+starting permutation: trunc begin select roll
+step trunc: TRUNCATE TABLE foo;
+step begin: 
+  BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+  -- Force snapshot open
+  SELECT 1 AS foo FROM txid_current();
+
+foo            
+
+1              
+step select: SELECT * FROM foo;
+i              
+
+step roll: ROLLBACK;
