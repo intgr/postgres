@@ -3467,7 +3467,8 @@ const_expressions_mutator(Node *node,
 			if (context->estimate)
 			{
 				CacheExpr  *cache = (CacheExpr *) node;
-				return const_expressions_mutator((Node *) cache->arg, context, cachable);
+				bool		isCachable = true;
+				return const_expressions_mutator((Node *) cache->arg, context, &isCachable);
 			}
 			break;
 		default:
