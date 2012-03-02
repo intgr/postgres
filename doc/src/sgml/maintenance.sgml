@@ -102,6 +102,11 @@
      </listitem>
 
      <listitem>
+      <simpara>To update the visibility map, which speeds up index-only
+      scans.</simpara>
+     </listitem>
+
+     <listitem>
       <simpara>To protect against loss of very old data due to
       <firstterm>transaction ID wraparound</>.</simpara>
      </listitem>
@@ -327,6 +332,28 @@
      plans that use the expression index.
     </para>
    </tip>
+  </sect2>
+
+  <sect2 id="vacuum-for-visibility-map">
+   <title>Updating Visibility Map</title>
+
+   <para>
+    Vacuum maintains the table <xref linkend="storage-vm">, which keeps track
+    of pages that only contain tuples that are visible to all transactions.
+    This has two purposes.  First, vacuum itself can skip such pages on the
+    next run, since there is nothing to clean up.
+   </para>
+
+   <para>
+    Second, index-only scans also take advantage of the visibility map. Since
+    <productname>PostgreSQL</productname> indexes don't contain tuple
+    visibility information, a normal index scan fetches the heap tuple for each
+    matching index entry, to check whether it should be seen by the current
+    transaction.  An index-only scan, on the other hand, checks the
+    visibility map first.  If it's known that all tuples on the page are
+    visible, the heap fetch can be skipped.  This is most noticeable on
+    large data sets where the visibility map can prevent disk accesses.
+   </para>
   </sect2>
 
   <sect2 id="vacuum-for-wraparound">
