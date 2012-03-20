@@ -3650,6 +3650,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 	 */
 
 	estate = CreateExecutorState();
+	estate->es_useCache = false;
 
 	/* Build the needed expression execution states */
 	foreach(l, tab->constraints)
@@ -3677,6 +3678,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 		NewColumnValue *ex = lfirst(l);
 
 		/* expr already planned */
+		Assert(estate->es_useCache == true);
 		ex->exprstate = ExecInitExpr((Expr *) ex->expr, NULL, true);
 	}
 

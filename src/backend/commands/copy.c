@@ -2300,9 +2300,7 @@ BeginCopyFrom(Relation rel,
 			{
 				/* Initialize expressions in copycontext. */
 				defexprs[num_defaults] = ExecInitExpr(
-										expression_planner((Expr *) defexpr),
-													  NULL,
-													  true);
+								 expression_planner((Expr *) defexpr), NULL);
 				defmap[num_defaults] = attnum - 1;
 				num_defaults++;
 
