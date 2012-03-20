@@ -3893,15 +3893,18 @@ ExecEvalCacheExpr(CacheExprState *cstate, ExprContext *econtext,
 	/* Set-returning expressions can't be cached */
 	Assert(isDone == NULL || *isDone == ExprSingleResult);
 
-	/* Figure out type and size for copy */
-	resultType = exprType((Node *) ((CacheExpr *) cstate->xprstate.expr)->arg);
-	get_typlenbyval(resultType, &resultTypLen, &resultTypByVal);
-
-	/* This cached datum has to persist for the whole query */
-	oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
-	cstate->result = datumCopy(result, resultTypByVal, resultTypLen);
 	cstate->isNull = *isNull;
-	MemoryContextSwitchTo(oldcontext);
+	if (! (*isNull))
+	{
+		/* Figure out type and size for copy */
+		resultType = exprType((Node *) ((CacheExpr *) cstate->xprstate.expr)->arg);
+		get_typlenbyval(resultType, &resultTypLen, &resultTypByVal);
+
+		/* This cached datum has to persist for the whole query */
+		oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
+		cstate->result = datumCopy(result, resultTypByVal, resultTypLen);
+		MemoryContextSwitchTo(oldcontext);
+	}
 
 	/* Subsequent calls will return the cached result */
 	cstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCacheExprResult;
