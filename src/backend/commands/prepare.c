@@ -217,6 +217,7 @@ ExecuteQuery(ExecuteStmt *stmt, IntoClause *intoClause,
 		 */
 		estate = CreateExecutorState();
 		estate->es_param_list_info = params;
+		estate->es_useCache = false;
 		paramLI = EvaluateParams(entry, stmt->params,
 								 queryString, estate);
 	}
@@ -664,6 +665,7 @@ ExplainExecuteQuery(ExecuteStmt *execstmt, IntoClause *into, ExplainState *es,
 		 */
 		estate = CreateExecutorState();
 		estate->es_param_list_info = params;
+		estate->es_useCache = false;
 		paramLI = EvaluateParams(entry, execstmt->params,
 								 queryString, estate);
 	}
