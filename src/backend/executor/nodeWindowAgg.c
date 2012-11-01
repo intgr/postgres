@@ -1454,10 +1454,10 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	winstate->temp_slot_1 = ExecInitExtraTupleSlot(estate);
 	winstate->temp_slot_2 = ExecInitExtraTupleSlot(estate);
 
+	Assert(estate->es_useCache == true);
 	winstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) winstate,
-					 true);
+					 (PlanState *) winstate);
 
 	/*
 	 * WindowAgg nodes never have quals, since they can only occur at the
@@ -1623,12 +1623,11 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 	winstate->frameOptions = node->frameOptions;
 
 	/* initialize frame bound offset expressions */
+	Assert(estate->es_useCache == true);
 	winstate->startOffset = ExecInitExpr((Expr *) node->startOffset,
-										 (PlanState *) winstate,
-										 true);
+										 (PlanState *) winstate);
 	winstate->endOffset = ExecInitExpr((Expr *) node->endOffset,
-									   (PlanState *) winstate,
-									   true);
+									   (PlanState *) winstate);
 
 	winstate->all_first = true;
 	winstate->partition_spooled = false;

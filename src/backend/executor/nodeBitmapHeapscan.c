@@ -568,18 +568,16 @@ ExecInitBitmapHeapScan(BitmapHeapScan *node, EState *estate, int eflags)
 	/*
 	 * initialize child expressions
 	 */
+	Assert(estate->es_useCache == true);
 	scanstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) scanstate,
-					 true);
+					 (PlanState *) scanstate);
 	scanstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) scanstate,
-					 true);
+					 (PlanState *) scanstate);
 	scanstate->bitmapqualorig = (List *)
 		ExecInitExpr((Expr *) node->bitmapqualorig,
-					 (PlanState *) scanstate,
-					 true);
+					 (PlanState *) scanstate);
 
 	/*
 	 * tuple table initialization

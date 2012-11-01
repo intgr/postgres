@@ -2348,10 +2348,10 @@ BeginCopyFrom(Relation rel,
 			if (defexpr != NULL)
 			{
 				/* Initialize expressions in copycontext. */
+				// XXX?
+				// Assert(estate->es_useCache == true);
 				defexprs[num_defaults] = ExecInitExpr(
-										expression_planner((Expr *) defexpr),
-													  NULL,
-													  true);
+								 expression_planner((Expr *) defexpr), NULL);
 				defmap[num_defaults] = attnum - 1;
 				num_defaults++;
 
