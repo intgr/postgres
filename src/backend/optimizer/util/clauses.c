@@ -4015,8 +4015,7 @@ simplify_function(Oid funcid, Oid result_type, int32 result_typmod,
  * expand_function_arguments: convert named-notation args to positional args
  * and/or insert default args, as needed
  *
- * If we need to change anything, the input argument list is copied, not
- * modified.
+ * The input argument list is always copied, not modified.
  *
  * Note: this gets applied to operator argument lists too, even though the
  * cases it handles should never occur there.  This should be OK since it
@@ -4054,6 +4053,10 @@ expand_function_arguments(List *args, Oid result_type, HeapTuple func_tuple)
 		args = add_function_defaults(args, func_tuple);
 		/* Recheck argument types and add casts if needed */
 		recheck_cast_function_args(args, result_type, func_tuple);
+	}
+	else
+	{
+		args = list_copy(args);
 	}
 
 	return args;
