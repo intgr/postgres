@@ -391,18 +391,16 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	 * Note: we don't initialize all of the indexorderby expression, only the
 	 * sub-parts corresponding to runtime keys (see below).
 	 */
+	Assert(estate->es_useCache == true);
 	indexstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) indexstate,
-					 true);
+					 (PlanState *) indexstate);
 	indexstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) indexstate,
-					 true);
+					 (PlanState *) indexstate);
 	indexstate->indexqual = (List *)
 		ExecInitExpr((Expr *) node->indexqual,
-					 (PlanState *) indexstate,
-					 true);
+					 (PlanState *) indexstate);
 
 	/*
 	 * tuple table initialization

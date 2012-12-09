@@ -4946,6 +4946,8 @@ get_actual_variable_range(PlannerInfo *root, VariableStatData *vardata,
 			bool		isnull[INDEX_MAX_KEYS];
 
 			estate = CreateExecutorState();
+			estate->es_useCache = false;
+
 			econtext = GetPerTupleExprContext(estate);
 			/* Make sure any cruft is generated in the econtext's memory */
 			tmpcontext = econtext->ecxt_per_tuple_memory;

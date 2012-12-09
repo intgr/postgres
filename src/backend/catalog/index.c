@@ -2164,6 +2164,8 @@ IndexBuildHeapScan(Relation heapRelation,
 	 * predicates.	Also a slot to hold the current tuple.
 	 */
 	estate = CreateExecutorState();
+	estate->es_useCache = false;
+
 	econtext = GetPerTupleExprContext(estate);
 	slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation));
 
@@ -2553,6 +2555,7 @@ IndexCheckExclusion(Relation heapRelation,
 	 * predicates.	Also a slot to hold the current tuple.
 	 */
 	estate = CreateExecutorState();
+	estate->es_useCache = false;
 	econtext = GetPerTupleExprContext(estate);
 	slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation));
 
@@ -2823,6 +2826,7 @@ validate_index_heapscan(Relation heapRelation,
 	 * predicates.	Also a slot to hold the current tuple.
 	 */
 	estate = CreateExecutorState();
+	estate->es_useCache = false;
 	econtext = GetPerTupleExprContext(estate);
 	slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRelation));
 

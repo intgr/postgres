@@ -140,6 +140,7 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	 * Build EState, switch into per-query memory context for startup.
 	 */
 	estate = CreateExecutorState();
+	estate->es_useCache = true; // XXX REMOVE
 	queryDesc->estate = estate;
 
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
@@ -2229,6 +2230,7 @@ EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree)
 	rtsize = list_length(parentestate->es_range_table);
 
 	epqstate->estate = estate = CreateExecutorState();
+	estate->es_useCache = true; // XXX
 
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 

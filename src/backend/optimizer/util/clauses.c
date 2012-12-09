@@ -2422,7 +2422,7 @@ const_expressions_mutator(Node *node,
 										   true,
 										   true,
 										   context,
-                                                                                   cachable);
+										   cachable);
 				if (simple)		/* successfully simplified it */
 					return (Node *) simple;
 
@@ -4785,6 +4785,7 @@ evaluate_expr(Expr *expr, Oid result_type, int32 result_typmod,
 	 * To use the executor, we need an EState.
 	 */
 	estate = CreateExecutorState();
+	estate->es_useCache = false;
 
 	/* We can use the estate's working context to avoid memory leaks. */
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
@@ -4796,7 +4797,8 @@ evaluate_expr(Expr *expr, Oid result_type, int32 result_typmod,
 	 * Prepare expr for execution.	(Note: we can't use ExecPrepareExpr
 	 * because it'd result in recursively invoking eval_const_expressions.)
 	 */
-	exprstate = ExecInitExpr(expr, NULL, false);
+	Assert(estate->es_useCache == false);
+	exprstate = ExecInitExpr(expr, NULL);
 
 	/*
 	 * And evaluate it.

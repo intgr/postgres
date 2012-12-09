@@ -398,12 +398,11 @@ ExecInitLimit(Limit *node, EState *estate, int eflags)
 	/*
 	 * initialize child expressions
 	 */
+	Assert(estate->es_useCache == true);
 	limitstate->limitOffset = ExecInitExpr((Expr *) node->limitOffset,
-										   (PlanState *) limitstate,
-										   true);
+										   (PlanState *) limitstate);
 	limitstate->limitCount = ExecInitExpr((Expr *) node->limitCount,
-										  (PlanState *) limitstate,
-										  true);
+										  (PlanState *) limitstate);
 
 	/*
 	 * Tuple table initialization (XXX not actually used...)

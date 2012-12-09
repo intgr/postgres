@@ -5029,9 +5029,10 @@ exec_eval_simple_expr(PLpgSQL_execstate *estate,
 	if (expr->expr_simple_lxid != curlxid)
 	{
 		oldcontext = MemoryContextSwitchTo(simple_eval_estate->es_query_cxt);
+		// Assert(estate->es_useCache == false);
+		// XXX FIXME!
 		expr->expr_simple_state = ExecInitExpr(expr->expr_simple_expr,
-											   NULL,
-											   false);
+											   NULL);
 		expr->expr_simple_in_use = false;
 		expr->expr_simple_lxid = curlxid;
 		MemoryContextSwitchTo(oldcontext);
@@ -6097,6 +6098,7 @@ plpgsql_create_econtext(PLpgSQL_execstate *estate)
 
 		oldcontext = MemoryContextSwitchTo(TopTransactionContext);
 		simple_eval_estate = CreateExecutorState();
+		simple_eval_estate->es_useCache = false;
 		MemoryContextSwitchTo(oldcontext);
 	}
 

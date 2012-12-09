@@ -712,6 +712,8 @@ compute_index_stats(Relation onerel, double totalrows,
 		 * sure it gets cleaned up at the bottom of the loop.
 		 */
 		estate = CreateExecutorState();
+		estate->es_useCache = false;
+
 		econtext = GetPerTupleExprContext(estate);
 		/* Need a slot to hold the current heap tuple, too */
 		slot = MakeSingleTupleTableSlot(RelationGetDescr(onerel));

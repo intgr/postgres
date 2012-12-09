@@ -1074,6 +1074,8 @@ ExecuteTruncate(TruncateStmt *stmt)
 	 * each relation.  We don't need to call ExecOpenIndices, though.
 	 */
 	estate = CreateExecutorState();
+	estate->es_useCache = false;
+
 	resultRelInfos = (ResultRelInfo *)
 		palloc(list_length(rels) * sizeof(ResultRelInfo));
 	resultRelInfo = resultRelInfos;
@@ -3630,6 +3632,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 	 */
 
 	estate = CreateExecutorState();
+	estate->es_useCache = true;
 
 	/* Build the needed expression execution states */
 	foreach(l, tab->constraints)
@@ -3657,7 +3660,8 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 		NewColumnValue *ex = lfirst(l);
 
 		/* expr already planned */
-		ex->exprstate = ExecInitExpr((Expr *) ex->expr, NULL, true);
+		Assert(estate->es_useCache == true);
+		ex->exprstate = ExecInitExpr((Expr *) ex->expr, NULL);
 	}
 
 	notnull_attrs = NIL;
@@ -6596,6 +6600,7 @@ validateCheckConstraint(Relation rel, HeapTuple constrtup)
 	constrForm = (Form_pg_constraint) GETSTRUCT(constrtup);
 
 	estate = CreateExecutorState();
+	estate->es_useCache = false;
 
 	/*
 	 * XXX this tuple doesn't really come from a syscache, but this doesn't

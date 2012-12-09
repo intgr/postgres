@@ -504,19 +504,17 @@ ExecInitTidScan(TidScan *node, EState *estate, int eflags)
 	/*
 	 * initialize child expressions
 	 */
+	Assert(estate->es_useCache == true);
 	tidstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) tidstate,
-					 true);
+					 (PlanState *) tidstate);
 	tidstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) tidstate,
-					 true);
+					 (PlanState *) tidstate);
 
 	tidstate->tss_tidquals = (List *)
 		ExecInitExpr((Expr *) node->tidquals,
-					 (PlanState *) tidstate,
-					 true);
+					 (PlanState *) tidstate);
 
 	/*
 	 * tuple table initialization
