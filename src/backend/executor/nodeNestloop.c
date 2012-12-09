@@ -320,19 +320,17 @@ ExecInitNestLoop(NestLoop *node, EState *estate, int eflags)
 	/*
 	 * initialize child expressions
 	 */
+	Assert(estate->es_useCache == true);
 	nlstate->js.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->join.plan.targetlist,
-					 (PlanState *) nlstate,
-					 true);
+					 (PlanState *) nlstate);
 	nlstate->js.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->join.plan.qual,
-					 (PlanState *) nlstate,
-					 true);
+					 (PlanState *) nlstate);
 	nlstate->js.jointype = node->join.jointype;
 	nlstate->js.joinqual = (List *)
 		ExecInitExpr((Expr *) node->join.joinqual,
-					 (PlanState *) nlstate,
-					 true);
+					 (PlanState *) nlstate);
 
 	/*
 	 * initialize child nodes

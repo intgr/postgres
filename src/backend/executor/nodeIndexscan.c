@@ -492,18 +492,16 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
 	 * would be nice to improve that.  (Problem is that any SubPlans present
 	 * in the expression must be found now...)
 	 */
+	Assert(estate->es_useCache == true);
 	indexstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) indexstate,
-					 true);
+					 (PlanState *) indexstate);
 	indexstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) indexstate,
-					 true);
+					 (PlanState *) indexstate);
 	indexstate->indexqualorig = (List *)
 		ExecInitExpr((Expr *) node->indexqualorig,
-					 (PlanState *) indexstate,
-					 true);
+					 (PlanState *) indexstate);
 
 	/*
 	 * tuple table initialization
@@ -704,6 +702,8 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 	int			n_array_keys;
 	int			j;
 
+	Assert(planstate->state->es_useCache == true);
+
 	/* Allocate array for ScanKey structs: one per qual */
 	n_scan_keys = list_length(quals);
 	scan_keys = (ScanKey) palloc(n_scan_keys * sizeof(ScanKeyData));
@@ -820,7 +820,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 				}
 				runtime_keys[n_runtime_keys].scan_key = this_scan_key;
 				runtime_keys[n_runtime_keys].key_expr =
-					ExecInitExpr(rightop, planstate, true);
+					ExecInitExpr(rightop, planstate);
 				runtime_keys[n_runtime_keys].key_toastable =
 					TypeIsToastable(op_righttype);
 				n_runtime_keys++;
@@ -947,7 +947,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 					}
 					runtime_keys[n_runtime_keys].scan_key = this_sub_key;
 					runtime_keys[n_runtime_keys].key_expr =
-						ExecInitExpr(rightop, planstate, true);
+						ExecInitExpr(rightop, planstate);
 					runtime_keys[n_runtime_keys].key_toastable =
 						TypeIsToastable(op_righttype);
 					n_runtime_keys++;
@@ -1065,7 +1065,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 					}
 					runtime_keys[n_runtime_keys].scan_key = this_scan_key;
 					runtime_keys[n_runtime_keys].key_expr =
-						ExecInitExpr(rightop, planstate, true);
+						ExecInitExpr(rightop, planstate);
 
 					/*
 					 * Careful here: the runtime expression is not of
@@ -1083,7 +1083,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 				/* Executor has to expand the array value */
 				array_keys[n_array_keys].scan_key = this_scan_key;
 				array_keys[n_array_keys].array_expr =
-					ExecInitExpr(rightop, planstate, true);
+					ExecInitExpr(rightop, planstate);
 				/* the remaining fields were zeroed by palloc0 */
 				n_array_keys++;
 				scanvalue = (Datum) 0;

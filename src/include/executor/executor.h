@@ -233,7 +233,7 @@ extern Tuplestorestate *ExecMakeTableFunctionResult(ExprState *funcexpr,
 							bool randomAccess);
 extern Datum ExecEvalExprSwitchContext(ExprState *expression, ExprContext *econtext,
 						  bool *isNull, ExprDoneCond *isDone);
-extern ExprState *ExecInitExpr(Expr *node, PlanState *parent, bool cacheEnabled);
+extern ExprState *ExecInitExpr(Expr *node, PlanState *parent);
 extern ExprState *ExecPrepareExpr(Expr *node, EState *estate);
 extern bool ExecQual(List *qual, ExprContext *econtext, bool resultForNull);
 extern int	ExecTargetListLength(List *targetlist);

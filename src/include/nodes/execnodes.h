@@ -364,6 +364,9 @@ typedef struct EState
 	ParamListInfo es_param_list_info;	/* values of external params */
 	ParamExecData *es_param_exec_vals;	/* values of internal params */
 
+	/* Enable CacheExpr caching? */
+	bool		es_useCache;
+
 	/* Other working state: */
 	MemoryContext es_query_cxt; /* per-query context in which EState lives */
 
@@ -699,7 +702,6 @@ typedef struct CacheExprState
 	ExprState	xprstate;
 	ExprState  *arg;		/* state of sub-expression */
 
-	bool		enabled;	/* is cache enabled? */
 	Datum		result;		/* cached result */
 	bool		isNull;		/* is result NULL? */
 } CacheExprState;

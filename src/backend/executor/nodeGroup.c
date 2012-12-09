@@ -223,14 +223,13 @@ ExecInitGroup(Group *node, EState *estate, int eflags)
 	/*
 	 * initialize child expressions
 	 */
+	Assert(estate->es_useCache == true);
 	grpstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) grpstate,
-					 true);
+					 (PlanState *) grpstate);
 	grpstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->plan.qual,
-					 (PlanState *) grpstate,
-					 true);
+					 (PlanState *) grpstate);
 
 	/*
 	 * initialize child nodes

@@ -134,6 +134,7 @@ unique_key_recheck(PG_FUNCTION_ARGS)
 		indexInfo->ii_ExclusionOps != NULL)
 	{
 		estate = CreateExecutorState();
+		estate->es_useCache = false;
 		econtext = GetPerTupleExprContext(estate);
 		econtext->ecxt_scantuple = slot;
 	}

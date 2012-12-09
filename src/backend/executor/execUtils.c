@@ -126,6 +126,8 @@ CreateExecutorState(void)
 	estate->es_param_list_info = NULL;
 	estate->es_param_exec_vals = NULL;
 
+	estate->es_useCache = 42; /* TEMPORARY CHECK */
+
 	estate->es_query_cxt = qcontext;
 
 	estate->es_tupleTable = NIL;
@@ -219,6 +221,8 @@ CreateExprContext(EState *estate)
 {
 	ExprContext *econtext;
 	MemoryContext oldcontext;
+
+	Assert(estate->es_useCache == true || estate->es_useCache == false);
 
 	/* Create the ExprContext node within the per-query memory context */
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);

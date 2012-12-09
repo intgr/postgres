@@ -3555,6 +3555,7 @@ afterTriggerInvokeEvents(AfterTriggerEventList *events,
 	if (estate == NULL)
 	{
 		estate = CreateExecutorState();
+		estate->es_useCache = false; // ???
 		local_estate = true;
 	}
 

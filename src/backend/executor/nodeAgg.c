@@ -1444,14 +1444,13 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 	 * that is true, we don't need to worry about evaluating the aggs in any
 	 * particular order.
 	 */
+	Assert(estate->es_useCache == true);
 	aggstate->ss.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) aggstate,
-					 true);
+					 (PlanState *) aggstate);
 	aggstate->ss.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->plan.qual,
-					 (PlanState *) aggstate,
-					 true);
+					 (PlanState *) aggstate);
 
 	/*
 	 * initialize child nodes

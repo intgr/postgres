@@ -1996,11 +1996,10 @@ CopyFrom(CopyState cstate)
 	Datum	   *values;
 	bool	   *nulls;
 	ResultRelInfo *resultRelInfo;
-	EState	   *estate = CreateExecutorState(); /* for ExecConstraints() */
+	EState	   *estate;
 	ExprContext *econtext;
 	TupleTableSlot *myslot;
 	MemoryContext oldcontext = CurrentMemoryContext;
-
 	ErrorContextCallback errcallback;
 	CommandId	mycid = GetCurrentCommandId(true);
 	int			hi_options = 0; /* start with default heap_insert options */
@@ -2012,6 +2011,9 @@ CopyFrom(CopyState cstate)
 #define MAX_BUFFERED_TUPLES 1000
 	HeapTuple  *bufferedTuples = NULL;	/* initialize to silence warning */
 	Size		bufferedTuplesSize = 0;
+
+	estate = CreateExecutorState(); /* for ExecConstraints() */
+	estate->es_useCache = true;
 
 	Assert(cstate->rel);
 
@@ -2481,10 +2483,10 @@ BeginCopyFrom(Relation rel,
 			if (defexpr != NULL)
 			{
 				/* Initialize expressions in copycontext. */
+				// XXX?
+				// Assert(estate->es_useCache == true);
 				defexprs[num_defaults] = ExecInitExpr(
-										expression_planner((Expr *) defexpr),
-													  NULL,
-													  true);
+								 expression_planner((Expr *) defexpr), NULL);
 				defmap[num_defaults] = attnum - 1;
 				num_defaults++;
 

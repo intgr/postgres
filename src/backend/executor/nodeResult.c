@@ -238,17 +238,15 @@ ExecInitResult(Result *node, EState *estate, int eflags)
 	/*
 	 * initialize child expressions
 	 */
+	Assert(estate->es_useCache == true);
 	resstate->ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) resstate,
-					 true);
+					 (PlanState *) resstate);
 	resstate->ps.qual = (List *)
 		ExecInitExpr((Expr *) node->plan.qual,
-					 (PlanState *) resstate,
-					 true);
+					 (PlanState *) resstate);
 	resstate->resconstantqual = ExecInitExpr((Expr *) node->resconstantqual,
-											 (PlanState *) resstate,
-											 true);
+											 (PlanState *) resstate);
 
 	/*
 	 * initialize child nodes

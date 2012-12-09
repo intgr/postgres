@@ -178,14 +178,13 @@ ExecInitHash(Hash *node, EState *estate, int eflags)
 	/*
 	 * initialize child expressions
 	 */
+	Assert(estate->es_useCache == true);
 	hashstate->ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->plan.targetlist,
-					 (PlanState *) hashstate,
-					 true);
+					 (PlanState *) hashstate);
 	hashstate->ps.qual = (List *)
 		ExecInitExpr((Expr *) node->plan.qual,
-					 (PlanState *) hashstate,
-					 true);
+					 (PlanState *) hashstate);
 
 	/*
 	 * initialize child nodes

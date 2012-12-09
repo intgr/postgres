@@ -668,8 +668,9 @@ ExecInitSubPlan(SubPlan *subplan, PlanState *parent)
 											   subplan->plan_id - 1);
 
 	/* Initialize subexpressions */
-	sstate->testexpr = ExecInitExpr((Expr *) subplan->testexpr, parent, true);
-	sstate->args = (List *) ExecInitExpr((Expr *) subplan->args, parent, true);
+	Assert(estate->es_useCache == true);
+	sstate->testexpr = ExecInitExpr((Expr *) subplan->testexpr, parent);
+	sstate->args = (List *) ExecInitExpr((Expr *) subplan->args, parent);
 
 	/*
 	 * initialize my state
@@ -1116,9 +1117,9 @@ ExecInitAlternativeSubPlan(AlternativeSubPlan *asplan, PlanState *parent)
 	 * Initialize subplans.  (Can we get away with only initializing the one
 	 * we're going to use?)
 	 */
+	Assert(parent->state->es_useCache == true);
 	asstate->subplans = (List *) ExecInitExpr((Expr *) asplan->subplans,
-											  parent,
-											  true);
+											  parent);
 
 	/*
 	 * Select the one to be used.  For this, we need an estimate of the number

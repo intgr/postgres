@@ -206,8 +206,9 @@ MJExamineQuals(List *mergeclauses,
 		/*
 		 * Prepare the input expressions for execution.
 		 */
-		clause->lexpr = ExecInitExpr((Expr *) linitial(qual->args), parent, true);
-		clause->rexpr = ExecInitExpr((Expr *) lsecond(qual->args), parent, true);
+		Assert(parent->state->es_useCache == true);
+		clause->lexpr = ExecInitExpr((Expr *) linitial(qual->args), parent);
+		clause->rexpr = ExecInitExpr((Expr *) lsecond(qual->args), parent);
 
 		/* Set up sort support data */
 		clause->ssup.ssup_cxt = CurrentMemoryContext;
@@ -1496,19 +1497,17 @@ ExecInitMergeJoin(MergeJoin *node, EState *estate, int eflags)
 	/*
 	 * initialize child expressions
 	 */
+	Assert(estate->es_useCache == true);
 	mergestate->js.ps.targetlist = (List *)
 		ExecInitExpr((Expr *) node->join.plan.targetlist,
-					 (PlanState *) mergestate,
-					 true);
+					 (PlanState *) mergestate);
 	mergestate->js.ps.qual = (List *)
 		ExecInitExpr((Expr *) node->join.plan.qual,
-					 (PlanState *) mergestate,
-					 true);
+					 (PlanState *) mergestate);
 	mergestate->js.jointype = node->join.jointype;
 	mergestate->js.joinqual = (List *)
 		ExecInitExpr((Expr *) node->join.joinqual,
-					 (PlanState *) mergestate,
-					 true);
+					 (PlanState *) mergestate);
 	mergestate->mj_ConstFalseJoin = false;
 	/* mergeclauses are handled below */
 

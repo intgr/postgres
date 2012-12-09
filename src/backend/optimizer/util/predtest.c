@@ -1469,6 +1469,7 @@ btree_predicate_proof(Expr *predicate, Node *clause, bool refute_it)
 	 * Evaluate the test.  For this we need an EState.
 	 */
 	estate = CreateExecutorState();
+	estate->es_useCache = false;
 
 	/* We can use the estate's working context to avoid memory leaks. */
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
@@ -1486,7 +1487,8 @@ btree_predicate_proof(Expr *predicate, Node *clause, bool refute_it)
 	fix_opfuncids((Node *) test_expr);
 
 	/* Prepare it for execution */
-	test_exprstate = ExecInitExpr(test_expr, NULL, false);
+	Assert(estate->es_useCache == false);
+	test_exprstate = ExecInitExpr(test_expr, NULL);
 
 	/* And execute it. */
 	test_result = ExecEvalExprSwitchContext(test_exprstate,
