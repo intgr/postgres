@@ -30196,7 +30196,7 @@ fi
 
 
 cat >>confdefs.h <<_ACEOF
-#define PG_VERSION_STR "PostgreSQL $PACKAGE_VERSION on $host, compiled by $cc_string, `expr $ac_cv_sizeof_void_p \* 8`-bit"
+#define PG_VERSION_STR "PostgreSQL $PACKAGE_VERSION on $cc_string, compiled by $host, `expr $ac_cv_sizeof_void_p \* 8`-bit"
 _ACEOF
 
 
