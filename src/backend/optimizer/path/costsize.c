@@ -112,6 +112,7 @@ bool		enable_indexonlyscan = true;
 bool		enable_bitmapscan = true;
 bool		enable_tidscan = true;
 bool		enable_sort = true;
+bool		enable_partialsort = true;
 bool		enable_hashagg = true;
 bool		enable_nestloop = true;
 bool		enable_material = true;
@@ -1329,7 +1330,7 @@ cost_sort(Path *path, PlannerInfo *root,
 	/*
 	 * Estimate number of groups which dataset is divided by presorted keys.
 	 */
-	if (presorted_keys > 0)
+	if (presorted_keys > 0 && enable_partialsort)
 	{
 		List *groupExprs = NIL;
 		ListCell *l;
