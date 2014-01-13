@@ -150,6 +150,9 @@ ApplySortComparator(Datum datum1, bool isNull1,
 #endif   /*-- PG_USE_INLINE || SORTSUPPORT_INCLUDE_DEFINITIONS */
 
 /* Other functions in utils/sort/sortsupport.c */
+extern SortSupport MakeSortSupportKeys(int nkeys, AttrNumber *attNums,
+					Oid *sortOperators, Oid *sortCollations,
+					bool *nullsFirstFlags);
 extern void PrepareSortSupportComparisonShim(Oid cmpFunc, SortSupport ssup);
 extern void PrepareSortSupportFromOrderingOp(Oid orderingOp, SortSupport ssup);
 

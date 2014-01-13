@@ -604,7 +604,6 @@ tuplesort_begin_heap(TupleDesc tupDesc,
 {
 	Tuplesortstate *state = tuplesort_begin_common(workMem, randomAccess);
 	MemoryContext oldcontext;
-	int			i;
 
 	oldcontext = MemoryContextSwitchTo(state->sortcontext);
 
@@ -632,24 +631,11 @@ tuplesort_begin_heap(TupleDesc tupDesc,
 	state->reversedirection = reversedirection_heap;
 
 	state->tupDesc = tupDesc;	/* assume we need not copy tupDesc */
-
-	/* Prepare SortSupport data for each column */
-	state->sortKeys = (SortSupport) palloc0(nkeys * sizeof(SortSupportData));
-
-	for (i = 0; i < nkeys; i++)
-	{
-		SortSupport sortKey = state->sortKeys + i;
-
-		AssertArg(attNums[i] != 0);
-		AssertArg(sortOperators[i] != 0);
-
-		sortKey->ssup_cxt = CurrentMemoryContext;
-		sortKey->ssup_collation = sortCollations[i];
-		sortKey->ssup_nulls_first = nullsFirstFlags[i];
-		sortKey->ssup_attno = attNums[i];
-
-		PrepareSortSupportFromOrderingOp(sortOperators[i], sortKey);
-	}
+	state->sortKeys = MakeSortSupportKeys(nkeys,
+										  attNums,
+										  sortOperators,
+										  sortCollations,
+										  nullsFirstFlags);
 
 	if (nkeys == 1)
 		state->onlyKey = state->sortKeys;
@@ -3544,10 +3530,3 @@ free_sort_tuple(Tuplesortstate *state, SortTuple *stup)
 	FREEMEM(state, GetMemoryChunkSpace(stup->tuple));
 	pfree(stup->tuple);
 }
-
-SortSupport
-tuplesort_get_sortkeys(Tuplesortstate *state)
-{
-	return state->sortKeys;
-}
-

@@ -114,8 +114,6 @@ extern void tuplesort_get_stats(Tuplesortstate *state,
 
 extern int	tuplesort_merge_order(int64 allowedMem);
 
-extern SortSupport tuplesort_get_sortkeys(Tuplesortstate *state);
-
 /*
  * These routines may only be called if randomAccess was specified 'true'.
  * Likewise, backwards scan in gettuple/getdatum is only allowed if

@@ -28,20 +28,19 @@ static bool
 cmpSortSkipCols(SortState *node, TupleDesc tupDesc, HeapTuple a, TupleTableSlot *b)
 {
 	int n = ((Sort *)node->ss.ps.plan)->skipCols, i;
-	SortSupport sortKeys = tuplesort_get_sortkeys(node->tuplesortstate);
 
 	for (i = 0; i < n; i++)
 	{
 		Datum datumA, datumB;
 		bool isnullA, isnullB;
-		AttrNumber attno = sortKeys[i].ssup_attno;
+		AttrNumber attno = node->skipKeys[i].ssup_attno;
 
 		datumA = heap_getattr(a, attno, tupDesc, &isnullA);
 		datumB = slot_getattr(b, attno, &isnullB);
 
 		if (ApplySortComparator(datumA, isnullA,
-                                  datumB, isnullB,
-                                  &sortKeys[i]))
+								datumB, isnullB,
+								&node->skipKeys[i]))
 			return false;
 	}
 	return true;
@@ -123,12 +122,21 @@ ExecSort(SortState *node)
 		tuplesort_reset((Tuplesortstate *) node->tuplesortstate);
 	else
 	{
+		/* Support structures for cmpSortSkipCols - already sorted columns */
+		if (skipCols)
+			node->skipKeys = MakeSortSupportKeys(skipCols,
+												 plannode->sortColIdx,
+												 plannode->sortOperators,
+												 plannode->collations,
+												 plannode->nullsFirst);
+
+		/* Only pass on remaining columns that are unsorted */
 		tuplesortstate = tuplesort_begin_heap(tupDesc,
-											  plannode->numCols,
-											  plannode->sortColIdx,
-											  plannode->sortOperators,
-											  plannode->collations,
-											  plannode->nullsFirst,
+											  plannode->numCols - skipCols,
+											  &(plannode->sortColIdx[skipCols]),
+											  &(plannode->sortOperators[skipCols]),
+											  &(plannode->collations[skipCols]),
+											  &(plannode->nullsFirst[skipCols]),
 											  work_mem,
 											  node->randomAccess);
 		if (node->bounded)

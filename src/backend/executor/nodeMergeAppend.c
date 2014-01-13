@@ -126,19 +126,11 @@ ExecInitMergeAppend(MergeAppend *node, EState *estate, int eflags)
 	 * initialize sort-key information
 	 */
 	mergestate->ms_nkeys = node->numCols;
-	mergestate->ms_sortkeys = palloc0(sizeof(SortSupportData) * node->numCols);
-
-	for (i = 0; i < node->numCols; i++)
-	{
-		SortSupport sortKey = mergestate->ms_sortkeys + i;
-
-		sortKey->ssup_cxt = CurrentMemoryContext;
-		sortKey->ssup_collation = node->collations[i];
-		sortKey->ssup_nulls_first = node->nullsFirst[i];
-		sortKey->ssup_attno = node->sortColIdx[i];
-
-		PrepareSortSupportFromOrderingOp(node->sortOperators[i], sortKey);
-	}
+	mergestate->ms_sortkeys = MakeSortSupportKeys(mergestate->ms_nkeys,
+												  node->sortColIdx,
+												  node->sortOperators,
+												  node->collations,
+												  node->nullsFirst);
 
 	/*
 	 * initialize to show we have not run the subplans yet

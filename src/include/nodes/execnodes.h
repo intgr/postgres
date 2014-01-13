@@ -1671,6 +1671,7 @@ typedef struct SortState
 	bool		finished;
 	int64		bound_Done;		/* value of bound we did the sort with */
 	void	   *tuplesortstate; /* private state of tuplesort.c */
+	SortSupport skipKeys;		/* columns already sorted in input */
 	HeapTuple	prev;
 } SortState;
 
