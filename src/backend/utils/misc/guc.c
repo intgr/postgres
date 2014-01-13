@@ -1,3 +1,4 @@
+
 /*--------------------------------------------------------------------
  * guc.c
  *
@@ -720,6 +721,15 @@ static struct config_bool ConfigureNamesBool[] =
 			NULL
 		},
 		&enable_sort,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_partialsort", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of partial sort steps."),
+			NULL
+		},
+		&enable_partialsort,
 		true,
 		NULL, NULL, NULL
 	},

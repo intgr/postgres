@@ -270,6 +270,7 @@
 #enable_nestloop = on
 #enable_seqscan = on
 #enable_sort = on
+#enable_partialsort = on
 #enable_tidscan = on
 
 # - Planner Cost Constants -

@@ -2808,6 +2808,19 @@ include 'filename'
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-enable-partialsort" xreflabel="enable_partialsort">
+      <term><varname>enable_partialsort</varname> (<type>boolean</type>)</term>
+      <indexterm>
+       <primary><varname>enable_partialsort</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Enables or disables the query planner's use of partial sort steps.
+        The default is <literal>on</>.
+       </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="guc-enable-tidscan" xreflabel="enable_tidscan">
       <term><varname>enable_tidscan</varname> (<type>boolean</type>)</term>
       <indexterm>

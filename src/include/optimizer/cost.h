@@ -56,6 +56,7 @@ extern bool enable_indexonlyscan;
 extern bool enable_bitmapscan;
 extern bool enable_tidscan;
 extern bool enable_sort;
+extern bool enable_partialsort;
 extern bool enable_hashagg;
 extern bool enable_nestloop;
 extern bool enable_material;
