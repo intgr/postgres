@@ -1668,8 +1668,10 @@ typedef struct SortState
 	int64		bound;			/* if bounded, how many tuples are needed */
 	bool		sort_Done;		/* sort completed yet? */
 	bool		bounded_Done;	/* value of bounded we did the sort with */
+	bool		finished;
 	int64		bound_Done;		/* value of bound we did the sort with */
 	void	   *tuplesortstate; /* private state of tuplesort.c */
+	HeapTuple	prev;
 } SortState;
 
 /* ---------------------

@@ -15,10 +15,37 @@
 
 #include "postgres.h"
 
+#include "access/htup_details.h"
 #include "executor/execdebug.h"
 #include "executor/nodeSort.h"
 #include "miscadmin.h"
 #include "utils/tuplesort.h"
+
+/*
+ * Check if first "skipCols" sort values are equal.
+ */
+static bool
+cmpSortSkipCols(SortState *node, TupleDesc tupDesc, HeapTuple a, TupleTableSlot *b)
+{
+	int n = ((Sort *)node->ss.ps.plan)->skipCols, i;
+	SortSupport sortKeys = tuplesort_get_sortkeys(node->tuplesortstate);
+
+	for (i = 0; i < n; i++)
+	{
+		Datum datumA, datumB;
+		bool isnullA, isnullB;
+		AttrNumber attno = sortKeys[i].ssup_attno;
+
+		datumA = heap_getattr(a, attno, tupDesc, &isnullA);
+		datumB = slot_getattr(b, attno, &isnullB);
+
+		if (ApplySortComparator(datumA, isnullA,
+                                  datumB, isnullB,
+                                  &sortKeys[i]))
+			return false;
+	}
+	return true;
+}
 
 
 /* ----------------------------------------------------------------
@@ -42,6 +69,10 @@ ExecSort(SortState *node)
 	ScanDirection dir;
 	Tuplesortstate *tuplesortstate;
 	TupleTableSlot *slot;
+	Sort	   *plannode = (Sort *) node->ss.ps.plan;
+	PlanState  *outerNode;
+	TupleDesc	tupDesc;
+	int			skipCols = plannode->skipCols;
 
 	/*
 	 * get state info from node
@@ -54,34 +85,44 @@ ExecSort(SortState *node)
 	tuplesortstate = (Tuplesortstate *) node->tuplesortstate;
 
 	/*
+	 * Return next tuple from sorted set if any.
+	 */
+	if (node->sort_Done)
+	{
+		slot = node->ss.ps.ps_ResultTupleSlot;
+		if (tuplesort_gettupleslot(tuplesortstate,
+									  ScanDirectionIsForward(dir),
+									  slot) || node->finished)
+			return slot;
+	}
+
+	/*
 	 * If first time through, read all tuples from outer plan and pass them to
 	 * tuplesort.c. Subsequent calls just fetch tuples from tuplesort.
 	 */
 
-	if (!node->sort_Done)
+	SO1_printf("ExecSort: %s\n",
+			   "sorting subplan");
+
+	/*
+	 * Want to scan subplan in the forward direction while creating the
+	 * sorted data.
+	 */
+	estate->es_direction = ForwardScanDirection;
+
+	/*
+	 * Initialize tuplesort module.
+	 */
+	SO1_printf("ExecSort: %s\n",
+			   "calling tuplesort_begin");
+
+	outerNode = outerPlanState(node);
+	tupDesc = ExecGetResultType(outerNode);
+
+	if (node->tuplesortstate != NULL)
+		tuplesort_reset((Tuplesortstate *) node->tuplesortstate);
+	else
 	{
-		Sort	   *plannode = (Sort *) node->ss.ps.plan;
-		PlanState  *outerNode;
-		TupleDesc	tupDesc;
-
-		SO1_printf("ExecSort: %s\n",
-				   "sorting subplan");
-
-		/*
-		 * Want to scan subplan in the forward direction while creating the
-		 * sorted data.
-		 */
-		estate->es_direction = ForwardScanDirection;
-
-		/*
-		 * Initialize tuplesort module.
-		 */
-		SO1_printf("ExecSort: %s\n",
-				   "calling tuplesort_begin");
-
-		outerNode = outerPlanState(node);
-		tupDesc = ExecGetResultType(outerNode);
-
 		tuplesortstate = tuplesort_begin_heap(tupDesc,
 											  plannode->numCols,
 											  plannode->sortColIdx,
@@ -93,39 +134,75 @@ ExecSort(SortState *node)
 		if (node->bounded)
 			tuplesort_set_bound(tuplesortstate, node->bound);
 		node->tuplesortstate = (void *) tuplesortstate;
+	}
 
-		/*
-		 * Scan the subplan and feed all the tuples to tuplesort.
-		 */
+	/*
+	 * Put next group of tuples where skipCols" sort values are equal to
+	 * tuplesort.
+	 */
+	for (;;)
+	{
+		slot = ExecProcNode(outerNode);
 
-		for (;;)
+		if (skipCols == 0)
 		{
-			slot = ExecProcNode(outerNode);
-
 			if (TupIsNull(slot))
+			{
+				node->finished = true;
 				break;
-
+			}
 			tuplesort_puttupleslot(tuplesortstate, slot);
 		}
+		else if (node->prev)
+		{
+			ExecStoreTuple(node->prev, node->ss.ps.ps_ResultTupleSlot, InvalidBuffer, false);
+			tuplesort_puttupleslot(tuplesortstate, node->ss.ps.ps_ResultTupleSlot);
 
-		/*
-		 * Complete the sort.
-		 */
-		tuplesort_performsort(tuplesortstate);
-
-		/*
-		 * restore to user specified direction
-		 */
-		estate->es_direction = dir;
-
-		/*
-		 * finally set the sorted flag to true
-		 */
-		node->sort_Done = true;
-		node->bounded_Done = node->bounded;
-		node->bound_Done = node->bound;
-		SO1_printf("ExecSort: %s\n", "sorting done");
+			if (TupIsNull(slot))
+			{
+				node->finished = true;
+				break;
+			}
+			else
+			{
+				bool cmp;
+				cmp = cmpSortSkipCols(node, tupDesc, node->prev, slot);
+				node->prev = ExecCopySlotTuple(slot);
+				if (!cmp)
+					break;
+			}
+		}
+		else
+		{
+			if (TupIsNull(slot))
+			{
+				node->finished = true;
+				break;
+			}
+			else
+			{
+				node->prev = ExecCopySlotTuple(slot);
+			}
+		}
 	}
+
+	/*
+	 * Complete the sort.
+	 */
+	tuplesort_performsort(tuplesortstate);
+
+	/*
+	 * restore to user specified direction
+	 */
+	estate->es_direction = dir;
+
+	/*
+	 * finally set the sorted flag to true
+	 */
+	node->sort_Done = true;
+	node->bounded_Done = node->bounded;
+	node->bound_Done = node->bound;
+	SO1_printf("ExecSort: %s\n", "sorting done");
 
 	SO1_printf("ExecSort: %s\n",
 			   "retrieving tuple from tuplesort");
@@ -174,7 +251,10 @@ ExecInitSort(Sort *node, EState *estate, int eflags)
 
 	sortstate->bounded = false;
 	sortstate->sort_Done = false;
+	sortstate->finished = false;
 	sortstate->tuplesortstate = NULL;
+	sortstate->prev = NULL;
+	sortstate->bound_Done = 0;
 
 	/*
 	 * Miscellaneous initialization

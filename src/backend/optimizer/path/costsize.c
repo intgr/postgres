@@ -1281,15 +1281,22 @@ cost_recursive_union(Plan *runion, Plan *nrterm, Plan *rterm)
  */
 void
 cost_sort(Path *path, PlannerInfo *root,
-		  List *pathkeys, Cost input_cost, double tuples, int width,
-		  Cost comparison_cost, int sort_mem,
+		  List *pathkeys, int presorted_keys,
+		  Cost input_startup_cost, Cost input_total_cost,
+		  double tuples, int width, Cost comparison_cost, int sort_mem,
 		  double limit_tuples)
 {
-	Cost		startup_cost = input_cost;
-	Cost		run_cost = 0;
+	Cost		startup_cost = input_startup_cost;
+	Cost		run_cost = 0,
+				rest_cost,
+				group_cost,
+				input_run_cost = input_total_cost - input_startup_cost;
 	double		input_bytes = relation_byte_size(tuples, width);
 	double		output_bytes;
 	double		output_tuples;
+	double		num_groups,
+				group_input_bytes,
+				group_tuples;
 	long		sort_mem_bytes = sort_mem * 1024L;
 
 	if (!enable_sort)
@@ -1319,13 +1326,47 @@ cost_sort(Path *path, PlannerInfo *root,
 		output_bytes = input_bytes;
 	}
 
-	if (output_bytes > sort_mem_bytes)
+	/*
+	 * Estimate number of groups which dataset is divided by presorted keys.
+	 */
+	if (presorted_keys > 0)
+	{
+		List *groupExprs = NIL;
+		ListCell *l;
+		int i = 0;
+
+		foreach(l, pathkeys)
+		{
+			PathKey *key = (PathKey *)lfirst(l);
+			EquivalenceMember *member = (EquivalenceMember *)
+								lfirst(list_head(key->pk_eclass->ec_members));
+
+			groupExprs = lappend(groupExprs, member->em_expr);
+
+			i++;
+			if (i >= presorted_keys)
+				break;
+		}
+
+		num_groups = estimate_num_groups(root, groupExprs, tuples);
+	}
+	else
+	{
+		num_groups = 1.0;
+	}
+
+	/*
+	 * Estimate average cost of one group sorting
+	 */
+	group_input_bytes = input_bytes / num_groups;
+	group_tuples = tuples / num_groups;
+	if (output_bytes > sort_mem_bytes && group_input_bytes > sort_mem_bytes)
 	{
 		/*
 		 * We'll have to use a disk-based sort of all the tuples
 		 */
-		double		npages = ceil(input_bytes / BLCKSZ);
-		double		nruns = (input_bytes / sort_mem_bytes) * 0.5;
+		double		npages = ceil(group_input_bytes / BLCKSZ);
+		double		nruns = (group_input_bytes / sort_mem_bytes) * 0.5;
 		double		mergeorder = tuplesort_merge_order(sort_mem_bytes);
 		double		log_runs;
 		double		npageaccesses;
@@ -1335,7 +1376,7 @@ cost_sort(Path *path, PlannerInfo *root,
 		 *
 		 * Assume about N log2 N comparisons
 		 */
-		startup_cost += comparison_cost * tuples * LOG2(tuples);
+		group_cost = comparison_cost * group_tuples * LOG2(group_tuples);
 
 		/* Disk costs */
 
@@ -1346,10 +1387,10 @@ cost_sort(Path *path, PlannerInfo *root,
 			log_runs = 1.0;
 		npageaccesses = 2.0 * npages * log_runs;
 		/* Assume 3/4ths of accesses are sequential, 1/4th are not */
-		startup_cost += npageaccesses *
+		group_cost += npageaccesses *
 			(seq_page_cost * 0.75 + random_page_cost * 0.25);
 	}
-	else if (tuples > 2 * output_tuples || input_bytes > sort_mem_bytes)
+	else if (group_tuples > 2 * output_tuples || group_input_bytes > sort_mem_bytes)
 	{
 		/*
 		 * We'll use a bounded heap-sort keeping just K tuples in memory, for
@@ -1357,13 +1398,24 @@ cost_sort(Path *path, PlannerInfo *root,
 		 * factor is a bit higher than for quicksort.  Tweak it so that the
 		 * cost curve is continuous at the crossover point.
 		 */
-		startup_cost += comparison_cost * tuples * LOG2(2.0 * output_tuples);
+		group_cost = comparison_cost * group_tuples * LOG2(2.0 * output_tuples);
 	}
 	else
 	{
 		/* We'll use plain quicksort on all the input tuples */
-		startup_cost += comparison_cost * tuples * LOG2(tuples);
+		group_cost = comparison_cost * group_tuples * LOG2(group_tuples);
 	}
+
+	/*
+	 * We've to sort first group to start output from node. Sorting rest of
+	 * groups are required to return all the tuples.
+	 */
+	startup_cost += group_cost;
+	rest_cost = (num_groups * (output_tuples / tuples) - 1.0) * group_cost;
+	if (rest_cost > 0.0)
+		run_cost += rest_cost;
+	startup_cost += input_run_cost / num_groups;
+	run_cost += input_run_cost * ((num_groups - 1.0) / num_groups);
 
 	/*
 	 * Also charge a small amount (arbitrarily set equal to operator cost) per
@@ -2075,6 +2127,8 @@ initial_cost_mergejoin(PlannerInfo *root, JoinCostWorkspace *workspace,
 		cost_sort(&sort_path,
 				  root,
 				  outersortkeys,
+				  pathkeys_common(outer_path->pathkeys, outersortkeys),
+				  outer_path->startup_cost,
 				  outer_path->total_cost,
 				  outer_path_rows,
 				  outer_path->parent->width,
@@ -2101,6 +2155,8 @@ initial_cost_mergejoin(PlannerInfo *root, JoinCostWorkspace *workspace,
 		cost_sort(&sort_path,
 				  root,
 				  innersortkeys,
+				  pathkeys_common(inner_path->pathkeys, innersortkeys),
+				  inner_path->startup_cost,
 				  inner_path->total_cost,
 				  inner_path_rows,
 				  inner_path->parent->width,

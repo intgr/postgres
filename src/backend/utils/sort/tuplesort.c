@@ -960,6 +960,25 @@ tuplesort_end(Tuplesortstate *state)
 	MemoryContextDelete(state->sortcontext);
 }
 
+void
+tuplesort_reset(Tuplesortstate *state)
+{
+	int i;
+
+	if (state->tapeset)
+		LogicalTapeSetClose(state->tapeset);
+
+	for (i = 0; i < state->memtupcount; i++)
+		free_sort_tuple(state, state->memtuples + i);
+
+	state->status = TSS_INITIAL;
+	state->memtupcount = 0;
+	state->boundUsed = false;
+	state->tapeset = NULL;
+	state->currentRun = 0;
+	state->result_tape = -1;
+}
+
 /*
  * Grow the memtuples[] array, if possible within our memory constraint.  We
  * must not exceed INT_MAX tuples in memory or the caller-provided memory
@@ -3525,3 +3544,10 @@ free_sort_tuple(Tuplesortstate *state, SortTuple *stup)
 	FREEMEM(state, GetMemoryChunkSpace(stup->tuple));
 	pfree(stup->tuple);
 }
+
+SortSupport
+tuplesort_get_sortkeys(Tuplesortstate *state)
+{
+	return state->sortKeys;
+}
+
