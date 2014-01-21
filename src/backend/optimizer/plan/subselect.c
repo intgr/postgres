@@ -731,7 +731,7 @@ build_subplan(PlannerInfo *root, Plan *plan, PlannerInfo *subroot,
 		 * unnecessarily, so we don't.
 		 */
 		else if (splan->parParam == NIL && enable_material &&
-				 !ExecMaterializesOutput(nodeTag(plan)))
+				 !ExecMaterializesOutput(nodeTag(plan), plan))
 			plan = materialize_finished_plan(plan);
 
 		result = (Node *) splan;

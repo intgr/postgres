@@ -662,7 +662,9 @@ sort_inner_and_outer(PlannerInfo *root,
 		cur_mergeclauses = find_mergeclauses_for_pathkeys(root,
 														  outerkeys,
 														  true,
-														  mergeclause_list);
+														  mergeclause_list,
+														  NULL,
+														  NULL);
 
 		/* Should have used them all... */
 		Assert(list_length(cur_mergeclauses) == list_length(mergeclause_list));
@@ -820,7 +822,7 @@ match_unsorted_outer(PlannerInfo *root,
 		 * output anyway.
 		 */
 		if (enable_material && inner_cheapest_total != NULL &&
-			!ExecMaterializesOutput(inner_cheapest_total->pathtype))
+			!ExecMaterializesOutput(inner_cheapest_total->pathtype, NULL))
 			matpath = (Path *)
 				create_material_path(innerrel, inner_cheapest_total);
 	}
@@ -832,6 +834,7 @@ match_unsorted_outer(PlannerInfo *root,
 		List	   *mergeclauses;
 		List	   *innersortkeys;
 		List	   *trialsortkeys;
+		List	   *outersortkeys;
 		Path	   *cheapest_startup_inner;
 		Path	   *cheapest_total_inner;
 		int			num_sortkeys;
@@ -937,7 +940,9 @@ match_unsorted_outer(PlannerInfo *root,
 		mergeclauses = find_mergeclauses_for_pathkeys(root,
 													  outerpath->pathkeys,
 													  true,
-													  mergeclause_list);
+													  mergeclause_list,
+													  joinrel,
+													  &outersortkeys);
 
 		/*
 		 * Done with this outer path if no chance for a mergejoin.
@@ -961,7 +966,7 @@ match_unsorted_outer(PlannerInfo *root,
 		/* Compute the required ordering of the inner path */
 		innersortkeys = make_inner_pathkeys_for_merge(root,
 													  mergeclauses,
-													  outerpath->pathkeys);
+													  outersortkeys);
 
 		/*
 		 * Generate a mergejoin on the basis of sorting the cheapest inner.
@@ -980,7 +985,7 @@ match_unsorted_outer(PlannerInfo *root,
 						   restrictlist,
 						   merge_pathkeys,
 						   mergeclauses,
-						   NIL,
+						   outersortkeys,
 						   innersortkeys);
 
 		/* Can't do anything else if inner path needs to be unique'd */
@@ -1038,7 +1043,6 @@ match_unsorted_outer(PlannerInfo *root,
 		for (sortkeycnt = num_sortkeys; sortkeycnt > 0; sortkeycnt--)
 		{
 			Path	   *innerpath;
-			List	   *newclauses = NIL;
 
 			/*
 			 * Look for an inner path ordered well enough for the first
@@ -1055,19 +1059,6 @@ match_unsorted_outer(PlannerInfo *root,
 				 compare_path_costs(innerpath, cheapest_total_inner,
 									TOTAL_COST) < 0))
 			{
-				/* Found a cheap (or even-cheaper) sorted path */
-				/* Select the right mergeclauses, if we didn't already */
-				if (sortkeycnt < num_sortkeys)
-				{
-					newclauses =
-						find_mergeclauses_for_pathkeys(root,
-													   trialsortkeys,
-													   false,
-													   mergeclauses);
-					Assert(newclauses != NIL);
-				}
-				else
-					newclauses = mergeclauses;
 				try_mergejoin_path(root,
 								   joinrel,
 								   jointype,
@@ -1078,9 +1069,9 @@ match_unsorted_outer(PlannerInfo *root,
 								   innerpath,
 								   restrictlist,
 								   merge_pathkeys,
-								   newclauses,
-								   NIL,
-								   NIL);
+								   mergeclauses,
+								   outersortkeys,
+								   innersortkeys);
 				cheapest_total_inner = innerpath;
 			}
 			/* Same on the basis of cheapest startup cost ... */
@@ -1096,24 +1087,6 @@ match_unsorted_outer(PlannerInfo *root,
 				/* Found a cheap (or even-cheaper) sorted path */
 				if (innerpath != cheapest_total_inner)
 				{
-					/*
-					 * Avoid rebuilding clause list if we already made one;
-					 * saves memory in big join trees...
-					 */
-					if (newclauses == NIL)
-					{
-						if (sortkeycnt < num_sortkeys)
-						{
-							newclauses =
-								find_mergeclauses_for_pathkeys(root,
-															   trialsortkeys,
-															   false,
-															   mergeclauses);
-							Assert(newclauses != NIL);
-						}
-						else
-							newclauses = mergeclauses;
-					}
 					try_mergejoin_path(root,
 									   joinrel,
 									   jointype,
@@ -1124,9 +1097,9 @@ match_unsorted_outer(PlannerInfo *root,
 									   innerpath,
 									   restrictlist,
 									   merge_pathkeys,
-									   newclauses,
-									   NIL,
-									   NIL);
+									   mergeclauses,
+									   outersortkeys,
+									   innersortkeys);
 				}
 				cheapest_startup_inner = innerpath;
 			}

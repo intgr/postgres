@@ -379,7 +379,7 @@ ExecRestrPos(PlanState *node)
  * and valuesscan support is actually useless code at present.)
  */
 bool
-ExecSupportsMarkRestore(NodeTag plantype)
+ExecSupportsMarkRestore(NodeTag plantype, Plan *node)
 {
 	switch (plantype)
 	{
@@ -389,8 +389,14 @@ ExecSupportsMarkRestore(NodeTag plantype)
 		case T_TidScan:
 		case T_ValuesScan:
 		case T_Material:
-		case T_Sort:
 			return true;
+
+		case T_Sort:
+			/* With skipCols sort node holds only last bucket */
+			if (node && ((Sort *)node)->skipCols == 0)
+				return true;
+			else
+				return false;
 
 		case T_Result:
 
@@ -466,9 +472,15 @@ ExecSupportsBackwardScan(Plan *node)
 				TargetListSupportsBackwardScan(node->targetlist);
 
 		case T_Material:
-		case T_Sort:
 			/* these don't evaluate tlist */
 			return true;
+
+		case T_Sort:
+			/* With skipCols sort node holds only last bucket */
+			if (((Sort *)node)->skipCols == 0)
+				return true;
+			else
+				return false;
 
 		case T_LockRows:
 		case T_Limit:
@@ -535,7 +547,7 @@ IndexSupportsBackwardScan(Oid indexid)
  * very low per-tuple cost.
  */
 bool
-ExecMaterializesOutput(NodeTag plantype)
+ExecMaterializesOutput(NodeTag plantype, Plan *node)
 {
 	switch (plantype)
 	{
@@ -543,8 +555,14 @@ ExecMaterializesOutput(NodeTag plantype)
 		case T_FunctionScan:
 		case T_CteScan:
 		case T_WorkTableScan:
-		case T_Sort:
 			return true;
+
+		case T_Sort:
+			/* With skipCols sort node holds only last bucket */
+			if (node && ((Sort *)node)->skipCols == 0)
+				return true;
+			else
+				return false;
 
 		default:
 			break;

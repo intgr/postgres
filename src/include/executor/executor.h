@@ -102,9 +102,9 @@ extern PGDLLIMPORT ExecutorCheckPerms_hook_type ExecutorCheckPerms_hook;
 extern void ExecReScan(PlanState *node);
 extern void ExecMarkPos(PlanState *node);
 extern void ExecRestrPos(PlanState *node);
-extern bool ExecSupportsMarkRestore(NodeTag plantype);
+extern bool ExecSupportsMarkRestore(NodeTag plantype, Plan *node);
 extern bool ExecSupportsBackwardScan(Plan *node);
-extern bool ExecMaterializesOutput(NodeTag plantype);
+extern bool ExecMaterializesOutput(NodeTag plantype, Plan *node);
 
 /*
  * prototypes from functions in execCurrent.c

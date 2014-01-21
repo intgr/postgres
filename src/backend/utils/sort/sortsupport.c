@@ -85,6 +85,35 @@ PrepareSortSupportComparisonShim(Oid cmpFunc, SortSupport ssup)
 }
 
 /*
+ * Build an array of SortSupportData structures from separated arrays.
+ */
+SortSupport
+MakeSortSupportKeys(int nkeys, AttrNumber *attNums,
+					Oid *sortOperators, Oid *sortCollations,
+					bool *nullsFirstFlags)
+{
+	SortSupport sortKeys = (SortSupport) palloc0(nkeys * sizeof(SortSupportData));
+	int			i;
+
+	for (i = 0; i < nkeys; i++)
+	{
+		SortSupport sortKey = sortKeys + i;
+
+		AssertArg(attNums[i] != 0);
+		AssertArg(sortOperators[i] != 0);
+
+		sortKey->ssup_cxt = CurrentMemoryContext;
+		sortKey->ssup_collation = sortCollations[i];
+		sortKey->ssup_nulls_first = nullsFirstFlags[i];
+		sortKey->ssup_attno = attNums[i];
+
+		PrepareSortSupportFromOrderingOp(sortOperators[i], sortKey);
+	}
+
+	return sortKeys;
+}
+
+/*
  * Fill in SortSupport given an ordering operator (btree "<" or ">" operator).
  *
  * Caller must previously have zeroed the SortSupportData structure and then

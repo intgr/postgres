@@ -149,6 +149,7 @@ static MergeJoin *make_mergejoin(List *tlist,
 			   Plan *lefttree, Plan *righttree,
 			   JoinType jointype);
 static Sort *make_sort(PlannerInfo *root, Plan *lefttree, int numCols,
+		  List *pathkeys, int skipCols,
 		  AttrNumber *sortColIdx, Oid *sortOperators,
 		  Oid *collations, bool *nullsFirst,
 		  double limit_tuples);
@@ -774,6 +775,7 @@ create_merge_append_plan(PlannerInfo *root, MergeAppendPath *best_path)
 		Oid		   *sortOperators;
 		Oid		   *collations;
 		bool	   *nullsFirst;
+		int			n_common_pathkeys;
 
 		/* Build the child plan */
 		subplan = create_plan_recurse(root, subpath);
@@ -807,8 +809,10 @@ create_merge_append_plan(PlannerInfo *root, MergeAppendPath *best_path)
 					  numsortkeys * sizeof(bool)) == 0);
 
 		/* Now, insert a Sort node if subplan isn't sufficiently ordered */
-		if (!pathkeys_contained_in(pathkeys, subpath->pathkeys))
+		n_common_pathkeys = pathkeys_common(pathkeys, subpath->pathkeys);
+		if (n_common_pathkeys < list_length(pathkeys))
 			subplan = (Plan *) make_sort(root, subplan, numsortkeys,
+										 pathkeys, n_common_pathkeys,
 										 sortColIdx, sortOperators,
 										 collations, nullsFirst,
 										 best_path->limit_tuples);
@@ -2181,9 +2185,11 @@ create_mergejoin_plan(PlannerInfo *root,
 		disuse_physical_tlist(root, outer_plan, best_path->jpath.outerjoinpath);
 		outer_plan = (Plan *)
 			make_sort_from_pathkeys(root,
-									outer_plan,
-									best_path->outersortkeys,
-									-1.0);
+								outer_plan,
+								best_path->outersortkeys,
+								-1.0,
+								pathkeys_common(best_path->outersortkeys,
+									best_path->jpath.outerjoinpath->pathkeys));
 		outerpathkeys = best_path->outersortkeys;
 	}
 	else
@@ -2194,9 +2200,11 @@ create_mergejoin_plan(PlannerInfo *root,
 		disuse_physical_tlist(root, inner_plan, best_path->jpath.innerjoinpath);
 		inner_plan = (Plan *)
 			make_sort_from_pathkeys(root,
-									inner_plan,
-									best_path->innersortkeys,
-									-1.0);
+								inner_plan,
+								best_path->innersortkeys,
+								-1.0,
+								pathkeys_common(best_path->innersortkeys,
+									best_path->jpath.innerjoinpath->pathkeys));
 		innerpathkeys = best_path->innersortkeys;
 	}
 	else
@@ -3736,6 +3744,7 @@ make_mergejoin(List *tlist,
  */
 static Sort *
 make_sort(PlannerInfo *root, Plan *lefttree, int numCols,
+          List *pathkeys, int skipCols,
 		  AttrNumber *sortColIdx, Oid *sortOperators,
 		  Oid *collations, bool *nullsFirst,
 		  double limit_tuples)
@@ -3745,7 +3754,8 @@ make_sort(PlannerInfo *root, Plan *lefttree, int numCols,
 	Path		sort_path;		/* dummy for result of cost_sort */
 
 	copy_plan_costsize(plan, lefttree); /* only care about copying size */
-	cost_sort(&sort_path, root, NIL,
+	cost_sort(&sort_path, root, pathkeys, skipCols,
+			  lefttree->startup_cost,
 			  lefttree->total_cost,
 			  lefttree->plan_rows,
 			  lefttree->plan_width,
@@ -3759,6 +3769,7 @@ make_sort(PlannerInfo *root, Plan *lefttree, int numCols,
 	plan->lefttree = lefttree;
 	plan->righttree = NULL;
 	node->numCols = numCols;
+	node->skipCols = skipCols;
 	node->sortColIdx = sortColIdx;
 	node->sortOperators = sortOperators;
 	node->collations = collations;
@@ -4087,7 +4098,7 @@ find_ec_member_for_tle(EquivalenceClass *ec,
  */
 Sort *
 make_sort_from_pathkeys(PlannerInfo *root, Plan *lefttree, List *pathkeys,
-						double limit_tuples)
+						double limit_tuples, int skipCols)
 {
 	int			numsortkeys;
 	AttrNumber *sortColIdx;
@@ -4107,7 +4118,7 @@ make_sort_from_pathkeys(PlannerInfo *root, Plan *lefttree, List *pathkeys,
 										  &nullsFirst);
 
 	/* Now build the Sort node */
-	return make_sort(root, lefttree, numsortkeys,
+	return make_sort(root, lefttree, numsortkeys, pathkeys, skipCols,
 					 sortColIdx, sortOperators, collations,
 					 nullsFirst, limit_tuples);
 }
@@ -4150,7 +4161,7 @@ make_sort_from_sortclauses(PlannerInfo *root, List *sortcls, Plan *lefttree)
 		numsortkeys++;
 	}
 
-	return make_sort(root, lefttree, numsortkeys,
+	return make_sort(root, lefttree, numsortkeys, NIL, 0,
 					 sortColIdx, sortOperators, collations,
 					 nullsFirst, -1.0);
 }
@@ -4172,7 +4183,8 @@ Sort *
 make_sort_from_groupcols(PlannerInfo *root,
 						 List *groupcls,
 						 AttrNumber *grpColIdx,
-						 Plan *lefttree)
+						 Plan *lefttree,
+						 List *pathkeys, int skipCols)
 {
 	List	   *sub_tlist = lefttree->targetlist;
 	ListCell   *l;
@@ -4205,7 +4217,7 @@ make_sort_from_groupcols(PlannerInfo *root,
 		numsortkeys++;
 	}
 
-	return make_sort(root, lefttree, numsortkeys,
+	return make_sort(root, lefttree, numsortkeys, pathkeys, skipCols,
 					 sortColIdx, sortOperators, collations,
 					 nullsFirst, -1.0);
 }

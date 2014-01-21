@@ -24,6 +24,7 @@
 #include "executor/tuptable.h"
 #include "fmgr.h"
 #include "utils/relcache.h"
+#include "utils/sortsupport.h"
 
 
 /* Tuplesortstate is an opaque type whose details are not known outside
@@ -103,6 +104,8 @@ extern bool tuplesort_skiptuples(Tuplesortstate *state, int64 ntuples,
 					 bool forward);
 
 extern void tuplesort_end(Tuplesortstate *state);
+
+extern void tuplesort_reset(Tuplesortstate *state);
 
 extern void tuplesort_get_stats(Tuplesortstate *state,
 					const char **sortMethod,
