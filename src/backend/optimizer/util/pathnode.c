@@ -971,10 +971,11 @@ create_merge_append_path(PlannerInfo *root,
 	foreach(l, subpaths)
 	{
 		Path	   *subpath = (Path *) lfirst(l);
+		int			n_common_pathkeys = pathkeys_common(pathkeys, subpath->pathkeys);
 
 		pathnode->path.rows += subpath->rows;
 
-		if (pathkeys_contained_in(pathkeys, subpath->pathkeys))
+		if (n_common_pathkeys == list_length(pathkeys))
 		{
 			/* Subpath is adequately ordered, we won't need to sort it */
 			input_startup_cost += subpath->startup_cost;
@@ -988,6 +989,8 @@ create_merge_append_path(PlannerInfo *root,
 			cost_sort(&sort_path,
 					  root,
 					  pathkeys,
+					  n_common_pathkeys,
+					  subpath->startup_cost,
 					  subpath->total_cost,
 					  subpath->parent->tuples,
 					  subpath->parent->width,
@@ -1343,7 +1346,8 @@ create_unique_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath,
 		/*
 		 * Estimate cost for sort+unique implementation
 		 */
-		cost_sort(&sort_path, root, NIL,
+		cost_sort(&sort_path, root, NIL, 0,
+				  subpath->startup_cost,
 				  subpath->total_cost,
 				  rel->rows,
 				  rel->width,

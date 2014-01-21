@@ -1349,7 +1349,9 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 			get_cheapest_fractional_path_for_pathkeys(final_rel->pathlist,
 													  root->query_pathkeys,
 													  NULL,
-													  tuple_fraction);
+													  tuple_fraction,
+													  root,
+													  path_rows);
 
 		/* Don't consider same path in both guises; just wastes effort */
 		if (sorted_path == cheapest_path)
@@ -1365,10 +1367,14 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 		if (sorted_path)
 		{
 			Path		sort_path;		/* dummy for result of cost_sort */
+			Path		partial_sort_path;	/* dummy for result of cost_sort */
+			int			n_common_pathkeys;
+
+			n_common_pathkeys = pathkeys_common(root->query_pathkeys,
+												cheapest_path->pathkeys);
 
 			if (root->query_pathkeys == NIL ||
-				pathkeys_contained_in(root->query_pathkeys,
-									  cheapest_path->pathkeys))
+					n_common_pathkeys == list_length(root->query_pathkeys))
 			{
 				/* No sort needed for cheapest path */
 				sort_path.startup_cost = cheapest_path->startup_cost;
@@ -1378,12 +1384,35 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 			{
 				/* Figure cost for sorting */
 				cost_sort(&sort_path, root, root->query_pathkeys,
+						  n_common_pathkeys,
+						  cheapest_path->startup_cost,
 						  cheapest_path->total_cost,
 						  path_rows, path_width,
 						  0.0, work_mem, root->limit_tuples);
 			}
 
-			if (compare_fractional_path_costs(sorted_path, &sort_path,
+			n_common_pathkeys = pathkeys_common(root->query_pathkeys,
+												sorted_path->pathkeys);
+
+			if (root->query_pathkeys == NIL ||
+					n_common_pathkeys == list_length(root->query_pathkeys))
+			{
+				/* No sort needed for cheapest path */
+				partial_sort_path.startup_cost = sorted_path->startup_cost;
+				partial_sort_path.total_cost = sorted_path->total_cost;
+			}
+			else
+			{
+				/* Figure cost for sorting */
+				cost_sort(&partial_sort_path, root, root->query_pathkeys,
+						  n_common_pathkeys,
+						  sorted_path->startup_cost,
+						  sorted_path->total_cost,
+						  path_rows, path_width,
+						  0.0, work_mem, root->limit_tuples);
+			}
+
+			if (compare_fractional_path_costs(&partial_sort_path, &sort_path,
 											  tuple_fraction) > 0)
 			{
 				/* Presorted path is a loser */
@@ -1464,13 +1493,16 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 			 * results.
 			 */
 			bool		need_sort_for_grouping = false;
+			int			n_common_pathkeys_grouping;
 
 			result_plan = create_plan(root, best_path);
 			current_pathkeys = best_path->pathkeys;
 
 			/* Detect if we'll need an explicit sort for grouping */
+			n_common_pathkeys_grouping = pathkeys_common(root->group_pathkeys,
+														 current_pathkeys);
 			if (parse->groupClause && !use_hashed_grouping &&
-			  !pathkeys_contained_in(root->group_pathkeys, current_pathkeys))
+				n_common_pathkeys_grouping < list_length(root->group_pathkeys))
 			{
 				need_sort_for_grouping = true;
 
@@ -1564,7 +1596,9 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 							make_sort_from_groupcols(root,
 													 parse->groupClause,
 													 groupColIdx,
-													 result_plan);
+													 result_plan,
+													 root->group_pathkeys,
+													n_common_pathkeys_grouping);
 						current_pathkeys = root->group_pathkeys;
 					}
 					aggstrategy = AGG_SORTED;
@@ -1607,7 +1641,9 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 						make_sort_from_groupcols(root,
 												 parse->groupClause,
 												 groupColIdx,
-												 result_plan);
+												 result_plan,
+												 root->group_pathkeys,
+												 n_common_pathkeys_grouping);
 					current_pathkeys = root->group_pathkeys;
 				}
 
@@ -1724,13 +1760,17 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 				if (window_pathkeys)
 				{
 					Sort	   *sort_plan;
+					int			n_common_pathkeys;
+
+					n_common_pathkeys = pathkeys_common(window_pathkeys,
+													    current_pathkeys);
 
 					sort_plan = make_sort_from_pathkeys(root,
 														result_plan,
 														window_pathkeys,
-														-1.0);
-					if (!pathkeys_contained_in(window_pathkeys,
-											   current_pathkeys))
+														-1.0,
+														n_common_pathkeys);
+					if (n_common_pathkeys < list_length(window_pathkeys))
 					{
 						/* we do indeed need to sort */
 						result_plan = (Plan *) sort_plan;
@@ -1876,19 +1916,21 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 			{
 				if (list_length(root->distinct_pathkeys) >=
 					list_length(root->sort_pathkeys))
-					current_pathkeys = root->distinct_pathkeys;
+					needed_pathkeys = root->distinct_pathkeys;
 				else
 				{
-					current_pathkeys = root->sort_pathkeys;
+					needed_pathkeys = root->sort_pathkeys;
 					/* Assert checks that parser didn't mess up... */
 					Assert(pathkeys_contained_in(root->distinct_pathkeys,
-												 current_pathkeys));
+												 needed_pathkeys));
 				}
 
 				result_plan = (Plan *) make_sort_from_pathkeys(root,
 															   result_plan,
-															current_pathkeys,
-															   -1.0);
+															   needed_pathkeys,
+															   -1.0,
+							pathkeys_common(needed_pathkeys, current_pathkeys));
+				current_pathkeys = needed_pathkeys;
 			}
 
 			result_plan = (Plan *) make_unique(result_plan,
@@ -1904,12 +1946,15 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 	 */
 	if (parse->sortClause)
 	{
-		if (!pathkeys_contained_in(root->sort_pathkeys, current_pathkeys))
+		int common = pathkeys_common(root->sort_pathkeys, current_pathkeys);
+		
+		if (common < list_length(root->sort_pathkeys))
 		{
 			result_plan = (Plan *) make_sort_from_pathkeys(root,
 														   result_plan,
 														 root->sort_pathkeys,
-														   limit_tuples);
+														   limit_tuples,
+														   common);
 			current_pathkeys = root->sort_pathkeys;
 		}
 	}
@@ -2654,6 +2699,7 @@ choose_hashed_grouping(PlannerInfo *root,
 	List	   *current_pathkeys;
 	Path		hashed_p;
 	Path		sorted_p;
+	int			n_common_pathkeys;
 
 	/*
 	 * Executor doesn't support hashed aggregation with DISTINCT or ORDER BY
@@ -2735,7 +2781,8 @@ choose_hashed_grouping(PlannerInfo *root,
 			 path_rows);
 	/* Result of hashed agg is always unsorted */
 	if (target_pathkeys)
-		cost_sort(&hashed_p, root, target_pathkeys, hashed_p.total_cost,
+		cost_sort(&hashed_p, root, target_pathkeys, 0,
+				  hashed_p.startup_cost, hashed_p.total_cost,
 				  dNumGroups, path_width,
 				  0.0, work_mem, limit_tuples);
 
@@ -2751,9 +2798,12 @@ choose_hashed_grouping(PlannerInfo *root,
 		sorted_p.total_cost = cheapest_path->total_cost;
 		current_pathkeys = cheapest_path->pathkeys;
 	}
-	if (!pathkeys_contained_in(root->group_pathkeys, current_pathkeys))
+
+	n_common_pathkeys = pathkeys_common(root->group_pathkeys, current_pathkeys);
+	if (n_common_pathkeys < list_length(root->group_pathkeys))
 	{
-		cost_sort(&sorted_p, root, root->group_pathkeys, sorted_p.total_cost,
+		cost_sort(&sorted_p, root, root->group_pathkeys,
+				  n_common_pathkeys, sorted_p.startup_cost, sorted_p.total_cost,
 				  path_rows, path_width,
 				  0.0, work_mem, -1.0);
 		current_pathkeys = root->group_pathkeys;
@@ -2768,10 +2818,12 @@ choose_hashed_grouping(PlannerInfo *root,
 		cost_group(&sorted_p, root, numGroupCols, dNumGroups,
 				   sorted_p.startup_cost, sorted_p.total_cost,
 				   path_rows);
+
 	/* The Agg or Group node will preserve ordering */
-	if (target_pathkeys &&
-		!pathkeys_contained_in(target_pathkeys, current_pathkeys))
-		cost_sort(&sorted_p, root, target_pathkeys, sorted_p.total_cost,
+	n_common_pathkeys = pathkeys_common(target_pathkeys, current_pathkeys);
+	if (target_pathkeys && n_common_pathkeys < list_length(target_pathkeys))
+		cost_sort(&sorted_p, root, target_pathkeys, n_common_pathkeys,
+				  sorted_p.startup_cost, sorted_p.total_cost,
 				  dNumGroups, path_width,
 				  0.0, work_mem, limit_tuples);
 
@@ -2824,6 +2876,7 @@ choose_hashed_distinct(PlannerInfo *root,
 	List	   *needed_pathkeys;
 	Path		hashed_p;
 	Path		sorted_p;
+	int			n_common_pathkeys;
 
 	/*
 	 * If we have a sortable DISTINCT ON clause, we always use sorting. This
@@ -2889,7 +2942,8 @@ choose_hashed_distinct(PlannerInfo *root,
 	 * need to charge for the final sort.
 	 */
 	if (parse->sortClause)
-		cost_sort(&hashed_p, root, root->sort_pathkeys, hashed_p.total_cost,
+		cost_sort(&hashed_p, root, root->sort_pathkeys, 0,
+				  hashed_p.startup_cost, hashed_p.total_cost,
 				  dNumDistinctRows, path_width,
 				  0.0, work_mem, limit_tuples);
 
@@ -2906,23 +2960,30 @@ choose_hashed_distinct(PlannerInfo *root,
 		needed_pathkeys = root->sort_pathkeys;
 	else
 		needed_pathkeys = root->distinct_pathkeys;
-	if (!pathkeys_contained_in(needed_pathkeys, current_pathkeys))
+
+	n_common_pathkeys = pathkeys_common(needed_pathkeys, current_pathkeys);
+	if (n_common_pathkeys < list_length(needed_pathkeys))
 	{
 		if (list_length(root->distinct_pathkeys) >=
 			list_length(root->sort_pathkeys))
 			current_pathkeys = root->distinct_pathkeys;
 		else
 			current_pathkeys = root->sort_pathkeys;
-		cost_sort(&sorted_p, root, current_pathkeys, sorted_p.total_cost,
+		cost_sort(&sorted_p, root, current_pathkeys,
+				  n_common_pathkeys, sorted_p.startup_cost, sorted_p.total_cost,
 				  path_rows, path_width,
 				  0.0, work_mem, -1.0);
 	}
 	cost_group(&sorted_p, root, numDistinctCols, dNumDistinctRows,
 			   sorted_p.startup_cost, sorted_p.total_cost,
 			   path_rows);
+
+
+	n_common_pathkeys = pathkeys_common(root->sort_pathkeys, current_pathkeys);
 	if (parse->sortClause &&
-		!pathkeys_contained_in(root->sort_pathkeys, current_pathkeys))
-		cost_sort(&sorted_p, root, root->sort_pathkeys, sorted_p.total_cost,
+		n_common_pathkeys < list_length(root->sort_pathkeys))
+		cost_sort(&sorted_p, root, root->sort_pathkeys, n_common_pathkeys,
+				  sorted_p.startup_cost, sorted_p.total_cost,
 				  dNumDistinctRows, path_width,
 				  0.0, work_mem, limit_tuples);
 
@@ -3712,8 +3773,9 @@ plan_cluster_use_sort(Oid tableOid, Oid indexOid)
 
 	/* Estimate the cost of seq scan + sort */
 	seqScanPath = create_seqscan_path(root, rel, NULL);
-	cost_sort(&seqScanAndSortPath, root, NIL,
-			  seqScanPath->total_cost, rel->tuples, rel->width,
+	cost_sort(&seqScanAndSortPath, root, NIL, 0,
+			  seqScanPath->startup_cost, seqScanPath->total_cost,
+			  rel->tuples, rel->width,
 			  comparisonCost, maintenance_work_mem, -1.0);
 
 	/* Estimate the cost of index scan */
