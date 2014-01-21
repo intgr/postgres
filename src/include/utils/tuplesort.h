@@ -24,6 +24,7 @@
 #include "executor/tuptable.h"
 #include "fmgr.h"
 #include "utils/relcache.h"
+#include "utils/sortsupport.h"
 
 
 /* Tuplesortstate is an opaque type whose details are not known outside
@@ -110,6 +111,8 @@ extern void tuplesort_get_stats(Tuplesortstate *state,
 					long *spaceUsed);
 
 extern int	tuplesort_merge_order(int64 allowedMem);
+
+extern SortSupport tuplesort_get_sortkeys(Tuplesortstate *state);
 
 /*
  * These routines may only be called if randomAccess was specified 'true'.

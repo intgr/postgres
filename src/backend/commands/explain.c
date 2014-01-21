@@ -81,7 +81,7 @@ static void show_agg_keys(AggState *astate, List *ancestors,
 static void show_group_keys(GroupState *gstate, List *ancestors,
 				ExplainState *es);
 static void show_sort_group_keys(PlanState *planstate, const char *qlabel,
-					 int nkeys, AttrNumber *keycols,
+					 int nkeys, int nPresortedKeys, AttrNumber *keycols,
 					 List *ancestors, ExplainState *es);
 static void show_sort_info(SortState *sortstate, ExplainState *es);
 static void show_hash_info(HashState *hashstate, ExplainState *es);
@@ -921,7 +921,10 @@ ExplainNode(PlanState *planstate, List *ancestors,
 			pname = sname = "Materialize";
 			break;
 		case T_Sort:
-			pname = sname = "Sort";
+			if (((Sort *) plan)->skipCols > 0)
+				pname = sname = "Partial sort";
+			else
+				pname = sname = "Sort";
 			break;
 		case T_Group:
 			pname = sname = "Group";
@@ -1727,7 +1730,7 @@ show_sort_keys(SortState *sortstate, List *ancestors, ExplainState *es)
 	Sort	   *plan = (Sort *) sortstate->ss.ps.plan;
 
 	show_sort_group_keys((PlanState *) sortstate, "Sort Key",
-						 plan->numCols, plan->sortColIdx,
+						 plan->numCols, plan->skipCols, plan->sortColIdx,
 						 ancestors, es);
 }
 
@@ -1741,7 +1744,7 @@ show_merge_append_keys(MergeAppendState *mstate, List *ancestors,
 	MergeAppend *plan = (MergeAppend *) mstate->ps.plan;
 
 	show_sort_group_keys((PlanState *) mstate, "Sort Key",
-						 plan->numCols, plan->sortColIdx,
+						 plan->numCols, 0, plan->sortColIdx,
 						 ancestors, es);
 }
 
@@ -1759,7 +1762,7 @@ show_agg_keys(AggState *astate, List *ancestors,
 		/* The key columns refer to the tlist of the child plan */
 		ancestors = lcons(astate, ancestors);
 		show_sort_group_keys(outerPlanState(astate), "Group Key",
-							 plan->numCols, plan->grpColIdx,
+							 plan->numCols, 0, plan->grpColIdx,
 							 ancestors, es);
 		ancestors = list_delete_first(ancestors);
 	}
@@ -1777,7 +1780,7 @@ show_group_keys(GroupState *gstate, List *ancestors,
 	/* The key columns refer to the tlist of the child plan */
 	ancestors = lcons(gstate, ancestors);
 	show_sort_group_keys(outerPlanState(gstate), "Group Key",
-						 plan->numCols, plan->grpColIdx,
+						 plan->numCols, 0, plan->grpColIdx,
 						 ancestors, es);
 	ancestors = list_delete_first(ancestors);
 }
@@ -1787,13 +1790,14 @@ show_group_keys(GroupState *gstate, List *ancestors,
  * as arrays of targetlist indexes
  */
 static void
-show_sort_group_keys(PlanState *planstate, const char *qlabel,
-					 int nkeys, AttrNumber *keycols,
+show_sort_group_keys(PlanState *planstate,  const char *qlabel,
+					 int nkeys, int nPresortedKeys, AttrNumber *keycols,
 					 List *ancestors, ExplainState *es)
 {
 	Plan	   *plan = planstate->plan;
 	List	   *context;
-	List	   *result = NIL;
+	List	   *resultSort = NIL;
+	List	   *resultPresorted = NIL;
 	bool		useprefix;
 	int			keyno;
 	char	   *exprstr;
@@ -1820,10 +1824,15 @@ show_sort_group_keys(PlanState *planstate, const char *qlabel,
 		/* Deparse the expression, showing any top-level cast */
 		exprstr = deparse_expression((Node *) target->expr, context,
 									 useprefix, true);
-		result = lappend(result, exprstr);
+
+		if (keyno < nPresortedKeys)
+			resultPresorted = lappend(resultPresorted, exprstr);
+		resultSort = lappend(resultSort, exprstr);
 	}
 
-	ExplainPropertyList(qlabel, result, es);
+	ExplainPropertyList(qlabel, resultSort, es);
+	if (nPresortedKeys > 0)
+		ExplainPropertyList("Presorted Key", resultPresorted, es);
 }
 
 /*

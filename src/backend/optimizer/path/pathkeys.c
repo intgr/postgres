@@ -26,6 +26,7 @@
 #include "optimizer/paths.h"
 #include "optimizer/tlist.h"
 #include "utils/lsyscache.h"
+#include "utils/selfuncs.h"
 
 
 static PathKey *make_canonical_pathkey(PlannerInfo *root,
@@ -312,6 +313,32 @@ compare_pathkeys(List *keys1, List *keys2)
 }
 
 /*
+ * pathkeys_common
+ *    Returns length of longest common prefix of keys1 and keys2.
+ */
+int
+pathkeys_common(List *keys1, List *keys2)
+{
+	int n;
+	ListCell   *key1,
+			   *key2;
+	n = 0;
+
+	forboth(key1, keys1, key2, keys2)
+	{
+		PathKey    *pathkey1 = (PathKey *) lfirst(key1);
+		PathKey    *pathkey2 = (PathKey *) lfirst(key2);
+
+		if (pathkey1 != pathkey2)
+			return n;
+		n++;
+	}
+
+	return n;
+}
+
+
+/*
  * pathkeys_contained_in
  *	  Common special case of compare_pathkeys: we just want to know
  *	  if keys2 are at least as well sorted as keys1.
@@ -368,6 +395,27 @@ get_cheapest_path_for_pathkeys(List *paths, List *pathkeys,
 	return matched_path;
 }
 
+static int
+compare_bifractional_path_costs(Path *path1, Path *path2,
+							  double fraction1, double fraction2)
+{
+	Cost		cost1,
+				cost2;
+
+	if (fraction1 <= 0.0 || fraction1 >= 1.0 ||
+			fraction2 <= 0.0 || fraction2 >= 1.0)
+		return compare_path_costs(path1, path2, TOTAL_COST);
+	cost1 = path1->startup_cost +
+		fraction1 * (path1->total_cost - path1->startup_cost);
+	cost2 = path2->startup_cost +
+		fraction2 * (path2->total_cost - path2->startup_cost);
+	if (cost1 < cost2)
+		return -1;
+	if (cost1 > cost2)
+		return +1;
+	return 0;
+}
+
 /*
  * get_cheapest_fractional_path_for_pathkeys
  *	  Find the cheapest path (for retrieving a specified fraction of all
@@ -386,26 +434,75 @@ Path *
 get_cheapest_fractional_path_for_pathkeys(List *paths,
 										  List *pathkeys,
 										  Relids required_outer,
-										  double fraction)
+										  double fraction,
+										  PlannerInfo *root,
+										  double tuples)
 {
 	Path	   *matched_path = NULL;
+	int			matched_n_common_pathkeys = 0,
+				costs_cmp, n_common_pathkeys,
+				n_pathkeys = list_length(pathkeys);
 	ListCell   *l;
+	List	   *groupExprs = NIL;
+	double	   *num_groups, matched_fraction;
+	int			i;
+
+	i = 0;
+	num_groups = (double *)palloc(sizeof(double) * list_length(pathkeys));
+	foreach(l, pathkeys)
+	{
+		PathKey *key = (PathKey *)lfirst(l);
+		EquivalenceMember *member = (EquivalenceMember *)
+							lfirst(list_head(key->pk_eclass->ec_members));
+
+		groupExprs = lappend(groupExprs, member->em_expr);
+
+		num_groups[i] = estimate_num_groups(root, groupExprs, tuples);
+		i++;
+	}
+
 
 	foreach(l, paths)
 	{
 		Path	   *path = (Path *) lfirst(l);
+		double		current_fraction;
+
+		n_common_pathkeys = pathkeys_common(pathkeys, path->pathkeys);
+		if (n_common_pathkeys < matched_n_common_pathkeys ||
+				n_common_pathkeys == 0)
+			continue;
+
+		current_fraction = fraction;
+		if (n_common_pathkeys < n_pathkeys)
+		{
+			current_fraction += 1.0 / num_groups[n_common_pathkeys - 1];
+			current_fraction = Max(current_fraction, 1.0);
+		}
 
 		/*
 		 * Since cost comparison is a lot cheaper than pathkey comparison, do
 		 * that first.	(XXX is that still true?)
 		 */
-		if (matched_path != NULL &&
-			compare_fractional_path_costs(matched_path, path, fraction) <= 0)
-			continue;
+		if (matched_path != NULL)
+		{
+			costs_cmp = compare_bifractional_path_costs(matched_path, path,
+					matched_fraction, current_fraction);
+		}
+		else
+		{
+			costs_cmp = 1;
+		}
 
-		if (pathkeys_contained_in(pathkeys, path->pathkeys) &&
+		if ((
+				n_common_pathkeys > matched_n_common_pathkeys
+				||	(n_common_pathkeys == matched_n_common_pathkeys
+					 && costs_cmp > 0)) &&
 			bms_is_subset(PATH_REQ_OUTER(path), required_outer))
+		{
 			matched_path = path;
+			matched_n_common_pathkeys = n_common_pathkeys;
+			matched_fraction = current_fraction;
+		}
 	}
 	return matched_path;
 }
@@ -965,10 +1062,16 @@ List *
 find_mergeclauses_for_pathkeys(PlannerInfo *root,
 							   List *pathkeys,
 							   bool outer_keys,
-							   List *restrictinfos)
+							   List *restrictinfos,
+							   RelOptInfo *joinrel,
+							   List **outersortkeys)
 {
 	List	   *mergeclauses = NIL;
 	ListCell   *i;
+	bool	   *used = (bool *)palloc0(sizeof(bool) * list_length(restrictinfos));
+	int			k;
+	List	   *unusedRestrictinfos = NIL;
+	List	   *usedPathkeys = NIL;
 
 	/* make sure we have eclasses cached in the clauses */
 	foreach(i, restrictinfos)
@@ -1021,6 +1124,7 @@ find_mergeclauses_for_pathkeys(PlannerInfo *root,
 		 * deal with the case in create_mergejoin_plan().
 		 *----------
 		 */
+		k = 0;
 		foreach(j, restrictinfos)
 		{
 			RestrictInfo *rinfo = (RestrictInfo *) lfirst(j);
@@ -1033,7 +1137,11 @@ find_mergeclauses_for_pathkeys(PlannerInfo *root,
 				clause_ec = rinfo->outer_is_left ?
 					rinfo->right_ec : rinfo->left_ec;
 			if (clause_ec == pathkey_ec)
+			{
 				matched_restrictinfos = lappend(matched_restrictinfos, rinfo);
+				used[k] = true;
+			}
+			k++;
 		}
 
 		/*
@@ -1044,11 +1152,48 @@ find_mergeclauses_for_pathkeys(PlannerInfo *root,
 		if (matched_restrictinfos == NIL)
 			break;
 
+		usedPathkeys = lappend(usedPathkeys, pathkey);
+
 		/*
 		 * If we did find usable mergeclause(s) for this sort-key position,
 		 * add them to result list.
 		 */
 		mergeclauses = list_concat(mergeclauses, matched_restrictinfos);
+	}
+
+	if (outersortkeys)
+	{
+		List *addPathkeys, *addMergeclauses;
+
+		*outersortkeys = pathkeys;
+
+		if (!mergeclauses)
+			return mergeclauses;
+
+		k = 0;
+		foreach(i, restrictinfos)
+		{
+			RestrictInfo *rinfo = (RestrictInfo *) lfirst(i);
+			if (!used[k])
+				unusedRestrictinfos = lappend(unusedRestrictinfos, rinfo);
+			k++;
+		}
+
+		if (!unusedRestrictinfos)
+			return mergeclauses;
+
+		addPathkeys = select_outer_pathkeys_for_merge(root,
+												unusedRestrictinfos, joinrel);
+
+		if (!addPathkeys)
+			return mergeclauses;
+
+		addMergeclauses = find_mergeclauses_for_pathkeys(root,
+				addPathkeys, true, unusedRestrictinfos, NULL, NULL);
+
+		*outersortkeys = list_concat(usedPathkeys, addPathkeys);
+		mergeclauses = list_concat(mergeclauses, addMergeclauses);
+
 	}
 
 	return mergeclauses;
@@ -1457,16 +1602,20 @@ right_merge_direction(PlannerInfo *root, PathKey *pathkey)
 static int
 pathkeys_useful_for_ordering(PlannerInfo *root, List *pathkeys)
 {
+	int n;
+
 	if (root->query_pathkeys == NIL)
 		return 0;				/* no special ordering requested */
 
 	if (pathkeys == NIL)
 		return 0;				/* unordered path */
 
-	if (pathkeys_contained_in(root->query_pathkeys, pathkeys))
+	n = pathkeys_common(root->query_pathkeys, pathkeys);
+
+	if (n != 0)
 	{
 		/* It's useful ... or at least the first N keys are */
-		return list_length(root->query_pathkeys);
+		return n;
 	}
 
 	return 0;					/* path ordering not useful */
