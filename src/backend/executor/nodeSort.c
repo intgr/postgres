@@ -120,18 +120,21 @@ ExecSort(SortState *node)
 	tupDesc = ExecGetResultType(outerNode);
 
 	if (node->tuplesortstate != NULL)
-		tuplesort_end((Tuplesortstate *) node->tuplesortstate);
-	tuplesortstate = tuplesort_begin_heap(tupDesc,
-										  plannode->numCols,
-										  plannode->sortColIdx,
-										  plannode->sortOperators,
-										  plannode->collations,
-										  plannode->nullsFirst,
-										  work_mem,
-										  node->randomAccess);
-	if (node->bounded)
-		tuplesort_set_bound(tuplesortstate, node->bound);
-	node->tuplesortstate = (void *) tuplesortstate;
+		tuplesort_reset((Tuplesortstate *) node->tuplesortstate);
+	else
+	{
+		tuplesortstate = tuplesort_begin_heap(tupDesc,
+											  plannode->numCols,
+											  plannode->sortColIdx,
+											  plannode->sortOperators,
+											  plannode->collations,
+											  plannode->nullsFirst,
+											  work_mem,
+											  node->randomAccess);
+		if (node->bounded)
+			tuplesort_set_bound(tuplesortstate, node->bound);
+		node->tuplesortstate = (void *) tuplesortstate;
+	}
 
 	/*
 	 * Put next group of tuples where skipCols" sort values are equal to
