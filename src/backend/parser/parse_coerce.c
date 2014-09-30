@@ -765,6 +765,7 @@ build_coercion_expression(Node *node,
 						  bool isExplicit)
 {
 	int			nargs = 0;
+	char		provolatile = 0;
 
 	if (OidIsValid(funcId))
 	{
@@ -792,6 +793,8 @@ build_coercion_expression(Node *node,
 		Assert(nargs < 2 || procstruct->proargtypes.values[1] == INT4OID);
 		Assert(nargs < 3 || procstruct->proargtypes.values[2] == BOOLOID);
 
+		provolatile = procstruct->provolatile;
+
 		ReleaseSysCache(tp);
 	}
 
@@ -804,6 +807,22 @@ build_coercion_expression(Node *node,
 
 		Assert(OidIsValid(funcId));
 
+		if (IsA(node, Const) && provolatile == PROVOLATILE_IMMUTABLE)
+		{
+			int16		typLen;
+			bool		typByVal;
+			Datum		value;
+
+			value = OidFunctionCall3Coll(funcId, InvalidOid, ((Const *) node)->constvalue, Int32GetDatum(targetTypMod), BoolGetDatum(isExplicit));
+			get_typlenbyval(targetTypeId, &typLen, &typByVal);
+			return (Node *) makeConst(targetTypeId,
+									  targetTypMod,
+									  InvalidOid,
+									  typLen,
+									  value,
+									  false,
+									  typByVal);
+		}
 		args = list_make1(node);
 
 		if (nargs >= 2)
