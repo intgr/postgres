@@ -70,7 +70,7 @@ static Node *convert_testexpr_mutator(Node *node,
 static bool subplan_is_hashable(Plan *plan);
 static bool testexpr_is_hashable(Node *testexpr);
 static bool hash_ok_operator(OpExpr *expr);
-static bool simplify_EXISTS_query(Query *query);
+static bool simplify_EXISTS_query(PlannerInfo *root, Query *query);
 static Query *convert_EXISTS_to_ANY(PlannerInfo *root, Query *subselect,
 					  Node **testexpr, List **paramIds);
 static Node *replace_correlation_vars_mutator(Node *node, PlannerInfo *root);
@@ -452,7 +452,7 @@ make_subplan(PlannerInfo *root, Query *orig_subquery,
 	 * If it's an EXISTS subplan, we might be able to simplify it.
 	 */
 	if (subLinkType == EXISTS_SUBLINK)
-		simple_exists = simplify_EXISTS_query(subquery);
+		simple_exists = simplify_EXISTS_query(root, subquery);
 
 	/*
 	 * For an EXISTS subplan, tell lower-level planner to expect that only the
@@ -518,7 +518,7 @@ make_subplan(PlannerInfo *root, Query *orig_subquery,
 		/* Make a second copy of the original subquery */
 		subquery = (Query *) copyObject(orig_subquery);
 		/* and re-simplify */
-		simple_exists = simplify_EXISTS_query(subquery);
+		simple_exists = simplify_EXISTS_query(root, subquery);
 		Assert(simple_exists);
 		/* See if it can be converted to an ANY query */
 		subquery = convert_EXISTS_to_ANY(root, subquery,
@@ -1359,7 +1359,7 @@ convert_EXISTS_sublink_to_join(PlannerInfo *root, SubLink *sublink,
 	 * targetlist, we have to fail, because the pullup operation leaves us
 	 * with noplace to evaluate the targetlist.
 	 */
-	if (!simplify_EXISTS_query(subselect))
+	if (!simplify_EXISTS_query(root, subselect))
 		return NULL;
 
 	/*
@@ -1486,11 +1486,11 @@ convert_EXISTS_sublink_to_join(PlannerInfo *root, SubLink *sublink,
  * Returns TRUE if was able to discard the targetlist, else FALSE.
  */
 static bool
-simplify_EXISTS_query(Query *query)
+simplify_EXISTS_query(PlannerInfo *root, Query *query)
 {
 	/*
 	 * We don't try to simplify at all if the query uses set operations,
-	 * aggregates, modifying CTEs, HAVING, LIMIT/OFFSET, or FOR UPDATE/SHARE;
+	 * aggregates, modifying CTEs, HAVING, OFFSET, or FOR UPDATE/SHARE;
 	 * none of these seem likely in normal usage and their possible effects
 	 * are complex.
 	 */
@@ -1501,7 +1501,6 @@ simplify_EXISTS_query(Query *query)
 		query->hasModifyingCTE ||
 		query->havingQual ||
 		query->limitOffset ||
-		query->limitCount ||
 		query->rowMarks)
 		return false;
 
@@ -1511,6 +1510,33 @@ simplify_EXISTS_query(Query *query)
 	 */
 	if (expression_returns_set((Node *) query->targetList))
 		return false;
+
+	/*
+	 * LIMIT clause can be removed if it's a positive constant or ALL, to
+	 * prevent it from being an optimization barrier. It's a common meme to put
+	 * LIMIT 1 within EXISTS subqueries.
+	 */
+	if (query->limitCount)
+	{
+		/*
+		 * eval_const_expressions has not been called yet by subquery_planner,
+		 * may still contain int64 coercions etc.
+		 */
+		Node	   *node = eval_const_expressions(root, query->limitCount);
+		Const	   *limit;
+
+		if (! IsA(node, Const))
+			return false;
+
+		limit = (Const *) node;
+		Assert(limit->consttype == INT8OID);
+
+		/* Checking for negative values is done later; 0 is just silly */
+		if (! limit->constisnull && DatumGetInt64(limit->constvalue) <= 0)
+			return false;
+
+		query->limitCount = NULL;
+	}
 
 	/*
 	 * Otherwise, we can throw away the targetlist, as well as any GROUP,

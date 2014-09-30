@@ -775,6 +775,20 @@ select * from int4_tbl o where (f1, f1) in
 (1 row)
 
 --
+-- Check EXISTS simplification with LIMIT
+--
+select * from int4_tbl o where not exists
+	(select 1 from int4_tbl i where i.f1=o.f1 limit 1);
+ f1 
+----
+(0 rows)
+
+select * from int4_tbl o where exists (select 1 limit 0);
+ f1 
+----
+(0 rows)
+
+--
 -- check for over-optimization of whole-row Var referencing an Append plan
 --
 select (select q from

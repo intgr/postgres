@@ -433,6 +433,13 @@ select * from int4_tbl o where (f1, f1) in
   (select f1, generate_series(1,2) / 10 g from int4_tbl i group by f1);
 
 --
+-- Check EXISTS simplification with LIMIT
+--
+select * from int4_tbl o where not exists
+	(select 1 from int4_tbl i where i.f1=o.f1 limit 1);
+select * from int4_tbl o where exists (select 1 limit 0);
+
+--
 -- check for over-optimization of whole-row Var referencing an Append plan
 --
 select (select q from
