@@ -940,12 +940,7 @@ RangeVarCallbackForDropRelation(const RangeVar *rel, Oid relOid, Oid oldRelOid,
 		!pg_namespace_ownercheck(classform->relnamespace, GetUserId()))
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS,
 					   rel->relname);
-
-	if (!allowSystemTableMods && IsSystemClass(relOid, classform))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						rel->relname)));
+	ForbidSystemTableMods(relOid, classform);
 
 	ReleaseSysCache(tuple);
 
@@ -1278,12 +1273,7 @@ truncate_check_rel(Relation rel)
 	if (aclresult != ACLCHECK_OK)
 		aclcheck_error(aclresult, ACL_KIND_CLASS,
 					   RelationGetRelationName(rel));
-
-	if (!allowSystemTableMods && IsSystemRelation(rel))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						RelationGetRelationName(rel))));
+	ForbidSystemTableMods(rel->rd_id, rel->rd_rel);
 
 	/*
 	 * Don't allow truncate on temp tables of other backends ... their local
@@ -2145,11 +2135,7 @@ renameatt_check(Oid myrelid, Form_pg_class classform, bool recursing)
 	if (!pg_class_ownercheck(myrelid, GetUserId()))
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS,
 					   NameStr(classform->relname));
-	if (!allowSystemTableMods && IsSystemClass(myrelid, classform))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						NameStr(classform->relname))));
+	ForbidSystemTableMods(myrelid, classform);
 }
 
 /*
@@ -4205,12 +4191,7 @@ ATSimplePermissions(Relation rel, int allowed_targets)
 	if (!pg_class_ownercheck(RelationGetRelid(rel), GetUserId()))
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS,
 					   RelationGetRelationName(rel));
-
-	if (!allowSystemTableMods && IsSystemRelation(rel))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						RelationGetRelationName(rel))));
+	ForbidSystemTableMods(rel->rd_id, rel->rd_rel);
 }
 
 /*
@@ -6036,11 +6017,7 @@ ATAddForeignKeyConstraint(AlteredTableInfo *tab, Relation rel,
 				 errmsg("referenced relation \"%s\" is not a table",
 						RelationGetRelationName(pkrel))));
 
-	if (!allowSystemTableMods && IsSystemRelation(pkrel))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						RelationGetRelationName(pkrel))));
+	ForbidSystemTableMods(pkrel->rd_id, pkrel->rd_rel);
 
 	/*
 	 * References from permanent or unlogged tables to temp tables, and from
@@ -11480,13 +11457,7 @@ RangeVarCallbackOwnsRelation(const RangeVar *relation,
 	if (!pg_class_ownercheck(relId, GetUserId()))
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS,
 					   relation->relname);
-
-	if (!allowSystemTableMods &&
-		IsSystemClass(relId, (Form_pg_class) GETSTRUCT(tuple)))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						relation->relname)));
+	ForbidSystemTableMods(relId, (Form_pg_class) GETSTRUCT(tuple));
 
 	ReleaseSysCache(tuple);
 }
@@ -11515,13 +11486,7 @@ RangeVarCallbackForAlterRelation(const RangeVar *rv, Oid relid, Oid oldrelid,
 	/* Must own relation. */
 	if (!pg_class_ownercheck(relid, GetUserId()))
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, rv->relname);
-
-	/* No system table modifications unless explicitly allowed. */
-	if (!allowSystemTableMods && IsSystemClass(relid, classform))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						rv->relname)));
+	ForbidSystemTableMods(relid, classform);
 
 	/*
 	 * Extract the specified relation type from the statement parse tree.

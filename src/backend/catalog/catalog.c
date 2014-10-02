@@ -92,6 +92,21 @@ IsCatalogRelation(Relation relation)
 }
 
 /*
+ * ForbidSystemTableMods
+ *		Emit error when referenced class is a system catalog, and catalog
+ *		modifications are not allowed.
+ */
+void
+ForbidSystemTableMods(Oid relid, Form_pg_class reltuple)
+{
+	if (!allowSystemTableMods && IsSystemClass(relid, reltuple))
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 errmsg("permission denied: \"%s\" is a system catalog",
+						NameStr(reltuple->relname))));
+}
+
+/*
  * IsCatalogClass
  *		True iff the relation is a system catalog relation.
  *

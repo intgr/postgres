@@ -226,11 +226,7 @@ CreateTrigger(CreateTrigStmt *stmt, const char *queryString,
 				 errmsg("\"%s\" is not a table or view",
 						RelationGetRelationName(rel))));
 
-	if (!allowSystemTableMods && IsSystemRelation(rel))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						RelationGetRelationName(rel))));
+	ForbidSystemTableMods(rel->rd_id, rel->rd_rel);
 
 	if (stmt->isconstraint)
 	{
@@ -1112,11 +1108,7 @@ RemoveTriggerById(Oid trigOid)
 				 errmsg("\"%s\" is not a table, view, or foreign table",
 						RelationGetRelationName(rel))));
 
-	if (!allowSystemTableMods && IsSystemRelation(rel))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						RelationGetRelationName(rel))));
+	ForbidSystemTableMods(relid, rel->rd_rel);
 
 	/*
 	 * Delete the pg_trigger tuple.
@@ -1220,11 +1212,7 @@ RangeVarCallbackForRenameTrigger(const RangeVar *rv, Oid relid, Oid oldrelid,
 	/* you must own the table to rename one of its triggers */
 	if (!pg_class_ownercheck(relid, GetUserId()))
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, rv->relname);
-	if (!allowSystemTableMods && IsSystemClass(relid, form))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						rv->relname)));
+	ForbidSystemTableMods(relid, form);
 
 	ReleaseSysCache(tuple);
 }

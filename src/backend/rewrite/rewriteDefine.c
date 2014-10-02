@@ -265,11 +265,7 @@ DefineQueryRewrite(char *rulename,
 				 errmsg("\"%s\" is not a table or view",
 						RelationGetRelationName(event_relation))));
 
-	if (!allowSystemTableMods && IsSystemRelation(event_relation))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						RelationGetRelationName(event_relation))));
+	ForbidSystemTableMods(event_relid, event_relation->rd_rel);
 
 	/*
 	 * Check user has permission to apply rules to this relation.
@@ -881,11 +877,7 @@ RangeVarCallbackForRenameRule(const RangeVar *rv, Oid relid, Oid oldrelid,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 				 errmsg("\"%s\" is not a table or view", rv->relname)));
 
-	if (!allowSystemTableMods && IsSystemClass(relid, form))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						rv->relname)));
+	ForbidSystemTableMods(relid, form);
 
 	/* you must own the table to rename one of its rules */
 	if (!pg_class_ownercheck(relid, GetUserId()))

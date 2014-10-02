@@ -76,13 +76,7 @@ RangeVarCallbackForPolicy(const RangeVar *rv, Oid relid, Oid oldrelid,
 	/* Must own relation. */
 	if (!pg_class_ownercheck(relid, GetUserId()))
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, rv->relname);
-
-	/* No system table modifications unless explicitly allowed. */
-	if (!allowSystemTableMods && IsSystemClass(relid, classform))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						rv->relname)));
+	ForbidSystemTableMods(relid, classform);
 
 	/* Relation type MUST be a table. */
 	if (relkind != RELKIND_RELATION)
@@ -409,11 +403,7 @@ RemovePolicyById(Oid policy_id)
 				 errmsg("\"%s\" is not a table",
 						RelationGetRelationName(rel))));
 
-	if (!allowSystemTableMods && IsSystemRelation(rel))
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("permission denied: \"%s\" is a system catalog",
-						RelationGetRelationName(rel))));
+	ForbidSystemTableMods(relid, rel->rd_rel);
 
 	simple_heap_delete(pg_rowsecurity_rel, &tuple->t_self);
 
