@@ -292,7 +292,7 @@ PostgreSQL documentation
         Specifies the shutdown mode.  <replaceable>mode</replaceable>
         can be <literal>smart</literal>, <literal>fast</literal>, or
         <literal>immediate</literal>, or the first letter of one of
-        these three.  If this is omitted, <literal>smart</literal> is used.
+        these three.  If this is omitted, <literal>fast</literal> is used.
        </para>
       </listitem>
      </varlistentry>

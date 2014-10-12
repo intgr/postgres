@@ -79,8 +79,8 @@ static bool do_wait = false;
 static bool wait_set = false;
 static int	wait_seconds = DEFAULT_WAIT;
 static bool silent_mode = false;
-static ShutdownMode shutdown_mode = SMART_MODE;
-static int	sig = SIGTERM;		/* default */
+static ShutdownMode shutdown_mode = FAST_MODE;
+static int	sig = SIGINT;		/* default */
 static CtlCommand ctl_command = NO_COMMAND;
 static char *pg_data = NULL;
 static char *pg_config = NULL;
@@ -1910,7 +1910,7 @@ do_help(void)
 
 	printf(_("\nShutdown modes are:\n"));
 	printf(_("  smart       quit after all clients have disconnected\n"));
-	printf(_("  fast        quit directly, with proper shutdown\n"));
+	printf(_("  fast        quit directly, with proper shutdown (default)\n"));
 	printf(_("  immediate   quit without complete shutdown; will lead to recovery on restart\n"));
 
 	printf(_("\nAllowed signal names for kill:\n"));
