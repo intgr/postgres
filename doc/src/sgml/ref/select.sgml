@@ -111,7 +111,9 @@ TABLE [ ONLY ] <replaceable class="parameter">table_name</replaceable> [ * ]
      <para>
       If the <literal>GROUP BY</literal> clause is specified, the
       output is combined into groups of rows that match on one or more
-      values.  If the <literal>HAVING</literal> clause is present, it
+      values.  All aggregate functions and their argument expressions
+      in the <command>SELECT</> and <literal>HAVING</> are evaluated.
+      If the <literal>HAVING</literal> clause is present, it
       eliminates groups that do not satisfy the given condition.  (See
       <xref linkend="sql-groupby" endterm="sql-groupby-title"> and
       <xref linkend="sql-having" endterm="sql-having-title"> below.)

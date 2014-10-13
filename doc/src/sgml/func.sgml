@@ -11251,6 +11251,25 @@ SELECT NULLIF(value, '(none)') ...
     make them return NULL if any argument is NULL, rather than only when
     all are NULL.
    </para>
+
+  <sect2 id="implementation">
+   <title>Implementation Notes</title>
+   <para>
+    When a conditional expression depends on the results of aggregate
+    functions in a <command>SELECT</> or <literal>HAVING</> clause, then all
+    the aggregate functions are always evaluated prior to determining which
+    branch the conditional should take.  For example, the following query can
+    cause a "division by zero" error despite only using division in a branch
+    that requires positive values:
+
+<programlisting>
+SELECT CASE WHEN min(employees)>0
+            THEN average(expenses / employees)
+       END
+    FROM departments
+</programlisting>
+   </para>
+
   </sect2>
  </sect1>
 
