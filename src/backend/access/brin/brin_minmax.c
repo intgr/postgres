@@ -13,8 +13,6 @@
 #include "access/genam.h"
 #include "access/brin_internal.h"
 #include "access/brin_tuple.h"
-#include "access/stratnum.h"
-#include "catalog/pg_type.h"
 #include "catalog/pg_amop.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
@@ -29,7 +27,7 @@ typedef struct MinmaxOpaque
 	FmgrInfo	strategy_procinfos[BTMaxStrategyNumber];
 } MinmaxOpaque;
 
-static FmgrInfo *minmax_get_strategy_procinfo(BrinDesc *bdesc, uint16 attno,
+static FmgrInfo *minmax_get_strategy_procinfo(BrinDesc *bdesc, AttrNumber attno,
 							 Oid subtype, uint16 strategynum);
 
 
@@ -68,7 +66,7 @@ brin_minmax_add_value(PG_FUNCTION_ARGS)
 	BrinDesc   *bdesc = (BrinDesc *) PG_GETARG_POINTER(0);
 	BrinValues *column = (BrinValues *) PG_GETARG_POINTER(1);
 	Datum		newval = PG_GETARG_DATUM(2);
-	bool		isnull = PG_GETARG_DATUM(3);
+	bool		isnull = PG_GETARG_BOOL(3);
 	Oid			colloid = PG_GET_COLLATION();
 	FmgrInfo   *cmpFn;
 	Datum		compar;
@@ -314,7 +312,7 @@ brin_minmax_union(PG_FUNCTION_ARGS)
  * there.  If changes are made here, see that function too.
  */
 static FmgrInfo *
-minmax_get_strategy_procinfo(BrinDesc *bdesc, uint16 attno, Oid subtype,
+minmax_get_strategy_procinfo(BrinDesc *bdesc, AttrNumber attno, Oid subtype,
 							 uint16 strategynum)
 {
 	MinmaxOpaque *opaque;

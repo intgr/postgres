@@ -166,7 +166,7 @@ brininsert(Relation idxRel, Datum *values, bool *nulls,
 		OffsetNumber off;
 		BrinTuple  *brtup;
 		BrinMemTuple *dtup;
-		int			keyno;
+		AttrNumber	keyno;
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -241,7 +241,7 @@ brininsert(Relation idxRel, Datum *values, bool *nulls,
 									   PointerGetDatum(bdesc),
 									   PointerGetDatum(bval),
 									   values[keyno],
-									   nulls[keyno]);
+									   BoolGetDatum(nulls[keyno]));
 			/* if that returned true, we need to insert the updated tuple */
 			need_insert |= DatumGetBool(result);
 		}
