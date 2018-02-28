@@ -50,7 +50,7 @@ ScanKeyEntryInitialize(ScanKey entry,
 	}
 	else
 	{
-		Assert(flags & (SK_SEARCHNULL | SK_SEARCHNOTNULL));
+		Assert(flags & (SK_SEARCHNULL | SK_SEARCHNOTNULL | SK_ORDER_BY));
 		MemSet(&entry->sk_func, 0, sizeof(entry->sk_func));
 	}
 }

@@ -4597,6 +4597,10 @@ fix_indexorderby_references(PlannerInfo *root, IndexPath *index_path)
 													   index,
 													   indexcol);
 		}
+		else if (IsA(clause, Var))
+		{
+			clause = fix_indexqual_operand(clause, index, indexcol);
+		}
 		else
 			elog(ERROR, "unsupported indexorderby type: %d",
 				 (int) nodeTag(clause));

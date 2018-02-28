@@ -6556,6 +6556,12 @@ orderby_operands_eval_cost(PlannerInfo *root, IndexPath *path)
 		if (IsA(clause, OpExpr))
 		{
 			other_operand = get_rightop(clause);
+			cost_qual_eval_node(&index_qual_cost, other_operand, root);
+		}
+		else if (IsA(clause, Var))
+		{
+			index_qual_cost.startup = 0;
+			index_qual_cost.per_tuple = 0;
 		}
 		else
 		{
@@ -6564,7 +6570,6 @@ orderby_operands_eval_cost(PlannerInfo *root, IndexPath *path)
 			other_operand = NULL;	/* keep compiler quiet */
 		}
 
-		cost_qual_eval_node(&index_qual_cost, other_operand, root);
 		qual_arg_cost += index_qual_cost.startup + index_qual_cost.per_tuple;
 	}
 	return qual_arg_cost;
