@@ -92,6 +92,7 @@ extern bool brininsert(Relation idxRel, Datum *values, bool *nulls,
 		   IndexUniqueCheck checkUnique,
 		   struct IndexInfo *indexInfo);
 extern IndexScanDesc brinbeginscan(Relation r, int nkeys, int norderbys);
+extern bool bringettuple(IndexScanDesc scan, ScanDirection dir);
 extern int64 bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm);
 extern void brinrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 		   ScanKey orderbys, int norderbys);

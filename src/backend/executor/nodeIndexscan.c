@@ -1228,6 +1228,44 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 		Expr	   *rightop;	/* expr on rhs ... */
 		AttrNumber	varattno;	/* att number used in scan */
 
+		if (IsA(clause, Var))
+		{
+			int			flags = 0;
+			Var		   *var = (Var *) clause;
+
+			Assert(isorderby);  // Only ORDER BY clause can contain Var
+			Assert(var->varno == INDEX_VAR);
+
+			varattno = var->varattno;
+			if (var->varattno < 1 || var->varattno > index->rd_index->indnatts)
+				elog(ERROR, "bogus index qualification");
+
+			/* FIXME
+			 * We have to look up the operator's strategy number.  This
+			 * provides a cross-check that the operator does match the index.
+			 */
+			opfamily = index->rd_opfamily[varattno - 1];
+
+			get_op_opfamily_properties(opno, opfamily, isorderby,
+									   &op_strategy,
+									   &op_lefttype,
+									   &op_righttype);
+
+			if (isorderby)
+				flags |= SK_ORDER_BY;
+
+			/*
+			 * initialize the scan key's fields appropriately
+			 */
+			ScanKeyEntryInitialize(this_scan_key,
+								   flags,
+								   var->varattno,	/* attribute number to scan */
+								   op_strategy, /* op's strategy */
+								   op_righttype,	/* strategy subtype */
+								   ((OpExpr *) clause)->inputcollid,	/* collation */
+								   InvalidOid,	/* no reg proc for this */
+								   (Datum) 0);	/* constant */
+		}
 		if (IsA(clause, OpExpr))
 		{
 			/* indexkey op const or indexkey op expression */

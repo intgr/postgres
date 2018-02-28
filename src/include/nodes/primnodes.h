@@ -178,6 +178,8 @@ typedef struct Var
 	int			location;		/* token location, or -1 if unknown */
 } Var;
 
+#define XX
+
 /*
  * Const
  *

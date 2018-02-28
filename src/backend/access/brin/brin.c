@@ -59,6 +59,14 @@ typedef struct BrinOpaque
 	BlockNumber bo_pagesPerRange;
 	BrinRevmap *bo_rmAccess;
 	BrinDesc   *bo_bdesc;
+
+	/* Data used by bringettuple only. */
+	BlockNumber bo_heapPages;
+	BrinMemTuple **bo_tuplestore;   // whole sorted revmap.
+	size_t		bo_store_count;		// number of elements in tuplestore
+	size_t		bo_rangeidx;		// current index in tuplestore.
+	ItemPointerData	item;			// last item returned
+
 } BrinOpaque;
 
 #define BRIN_ALL_BLOCKRANGES	InvalidBlockNumber
@@ -85,9 +93,9 @@ brinhandler(PG_FUNCTION_ARGS)
 
 	amroutine->amstrategies = 0;
 	amroutine->amsupport = BRIN_LAST_OPTIONAL_PROCNUM;
-	amroutine->amcanorder = false;
+	amroutine->amcanorder = true;
 	amroutine->amcanorderbyop = false;
-	amroutine->amcanbackward = false;
+	amroutine->amcanbackward = false;	// TODO
 	amroutine->amcanunique = false;
 	amroutine->amcanmulticol = true;
 	amroutine->amoptionalkey = true;
@@ -111,7 +119,7 @@ brinhandler(PG_FUNCTION_ARGS)
 	amroutine->amvalidate = brinvalidate;
 	amroutine->ambeginscan = brinbeginscan;
 	amroutine->amrescan = brinrescan;
-	amroutine->amgettuple = NULL;
+	amroutine->amgettuple = bringettuple;
 	amroutine->amgetbitmap = bringetbitmap;
 	amroutine->amendscan = brinendscan;
 	amroutine->ammarkpos = NULL;
@@ -332,10 +340,276 @@ brinbeginscan(Relation r, int nkeys, int norderbys)
 	opaque->bo_rmAccess = brinRevmapInitialize(r, &opaque->bo_pagesPerRange,
 											   scan->xs_snapshot);
 	opaque->bo_bdesc = brin_build_desc(r);
+	// FIXME also in rescan?
+	opaque->bo_tuplestore = NULL;
+	opaque->bo_store_count = 0;
+	opaque->bo_rangeidx = 0;
 	scan->opaque = opaque;
 
 	return scan;
 }
+
+
+static int brintuple_cmp(const void *a, const void *b, void *arg)
+{
+	IndexScanDesc scan = (IndexScanDesc)arg;
+
+	/* TODO asd */
+	return 0;
+}
+
+
+// TODO: Rename everything with "tuplestore", that's just wrong!
+void
+populate_tuplestore(IndexScanDesc scan, ScanDirection dir)
+{
+	Relation	idxRel = scan->indexRelation;
+	BrinOpaque *opaque = (BrinOpaque *)scan->opaque;
+	BrinDesc   *bdesc = opaque->bo_bdesc;
+	Buffer		buf = InvalidBuffer;
+	BlockNumber nblocks;
+	BlockNumber heapBlk;
+	int			totalpages = 0;
+	int 		i;
+	FmgrInfo   *consistentFn;
+	MemoryContext oldcxt;
+	MemoryContext perRangeCxt;
+	BrinMemTuple *dtup;
+	BrinTuple  *btup = NULL;
+	Size		btupsz = 0;
+	Size 		maxranges;
+	Oid			heapOid;
+	Relation	heapRel;
+
+	/* XXX share with gettuple() */
+	heapOid = IndexGetRelation(RelationGetRelid(idxRel), false);
+	heapRel = heap_open(heapOid, AccessShareLock);
+	opaque->bo_heapPages = RelationGetNumberOfBlocks(heapRel);
+	heap_close(heapRel, AccessShareLock);
+
+	/*
+	 * Make room for the consistent support procedures of indexed columns.  We
+	 * don't look them up here; we do that lazily the first time we see a scan
+	 * key reference each of them.  We rely on zeroing fn_oid to InvalidOid.
+	 */
+	consistentFn = palloc0(sizeof(FmgrInfo) * bdesc->bd_tupdesc->natts);
+
+	oldcxt = MemoryContextSwitchTo(TopMemoryContext);	// FIXME
+
+	maxranges = (opaque->bo_heapPages + opaque->bo_pagesPerRange - 1)
+				 / opaque->bo_pagesPerRange;
+	// Allocate for maximum size
+	opaque->bo_tuplestore = palloc(sizeof(BrinMemTuple *) * maxranges);
+	opaque->bo_store_count = 0;
+
+	/* allocate an initial in-memory tuple, out of the per-range memcxt */
+	//dtup = brin_new_memtuple(bdesc);
+
+	// for (i = 0; i < opaque->bo_tuplecnt; i++)
+	for (heapBlk = 0; heapBlk < opaque->bo_heapPages; heapBlk += opaque->bo_pagesPerRange)
+	{
+		bool		addrange;
+		bool		gottuple = false;
+		BrinTuple  *tup;
+		OffsetNumber off;
+		Size		size;
+
+		CHECK_FOR_INTERRUPTS();
+
+		// MemoryContextResetAndDeleteChildren(perRangeCxt);
+
+		tup = brinGetTupleForHeapBlock(opaque->bo_rmAccess, heapBlk, &buf,
+									   &off, &size, BUFFER_LOCK_SHARE,
+									   scan->xs_snapshot);
+
+		dtup = brin_new_memtuple(bdesc);
+		if (tup)
+		{
+			gottuple = true;
+			btup = brin_copy_tuple(tup, size, btup, &btupsz);
+			LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+		}
+		else {
+			// FIXME wat nao?
+			dtup->bt_blkno = heapBlk;
+			dtup->bt_placeholder = true;
+		}
+
+		/*
+		 * For page ranges with no indexed tuple, we must return the whole
+		 * range; otherwise, compare it to the scan keys.
+		 */
+		if (!gottuple)
+		{
+			addrange = true;
+		}
+		else
+		{
+			dtup = brin_deform_tuple(bdesc, btup, dtup);
+
+			Assert(dtup->bt_blkno == heapBlk);
+
+			if (dtup->bt_placeholder)
+			{
+				/*
+				 * Placeholder tuples are always returned, regardless of the
+				 * values stored in them.
+				 */
+				addrange = true;
+			}
+			else
+			{
+				int			keyno;
+
+				/*
+				 * Compare scan keys with summary values stored for the range.
+				 * If scan keys are matched, the page range must be added to
+				 * the bitmap.  We initially assume the range needs to be
+				 * added; in particular this serves the case where there are
+				 * no keys.
+				 */
+				addrange = true;
+				for (keyno = 0; keyno < scan->numberOfKeys; keyno++)
+				{
+					ScanKey		key = &scan->keyData[keyno];
+					AttrNumber	keyattno = key->sk_attno;
+					BrinValues *bval = &dtup->bt_columns[keyattno - 1];
+					Datum		add;
+
+					/*
+					 * The collation of the scan key must match the collation
+					 * used in the index column (but only if the search is not
+					 * IS NULL/ IS NOT NULL).  Otherwise we shouldn't be using
+					 * this index ...
+					 */
+					Assert((key->sk_flags & SK_ISNULL) ||
+						   (key->sk_collation ==
+							TupleDescAttr(bdesc->bd_tupdesc,
+										  keyattno - 1)->attcollation));
+
+					/* First time this column? look up consistent function */
+					if (consistentFn[keyattno - 1].fn_oid == InvalidOid)
+					{
+						FmgrInfo   *tmp;
+
+						tmp = index_getprocinfo(idxRel, keyattno,
+												BRIN_PROCNUM_CONSISTENT);
+						fmgr_info_copy(&consistentFn[keyattno - 1], tmp,
+									   CurrentMemoryContext);
+					}
+
+					/*
+					 * Check whether the scan key is consistent with the page
+					 * range values; if so, have the pages in the range added
+					 * to the output bitmap.
+					 *
+					 * When there are multiple scan keys, failure to meet the
+					 * criteria for a single one of them is enough to discard
+					 * the range as a whole, so break out of the loop as soon
+					 * as a false return value is obtained.
+					 */
+					add = FunctionCall3Coll(&consistentFn[keyattno - 1],
+											key->sk_collation,
+											PointerGetDatum(bdesc),
+											PointerGetDatum(bval),
+											PointerGetDatum(key));
+					addrange = DatumGetBool(add);
+					if (!addrange)
+						break;
+				}
+			}
+		}
+
+		/* add the pages in the range to the range store, if needed */
+		if (addrange)
+		{
+			Assert(opaque->bo_store_count < maxranges);
+			opaque->bo_tuplestore[opaque->bo_store_count] = dtup;
+			opaque->bo_store_count++;
+		}
+	}
+
+	MemoryContextSwitchTo(oldcxt);
+
+	if (buf != InvalidBuffer)
+		ReleaseBuffer(buf);
+
+	// qsort_arg(opaque->bo_tuplestore, opaque->bo_tuplecnt, sizeof(BrinMemTuple *), brintuple_cmp, scan);
+}
+
+
+/*
+ *	Get the next tuple in the scan.
+ */
+bool
+bringettuple(IndexScanDesc scan, ScanDirection dir)
+{
+	Relation	idxRel = scan->indexRelation;
+	BrinOpaque *opaque = (BrinOpaque *)scan->opaque;
+	BrinDesc   *bdesc = opaque->bo_bdesc;
+	BrinMemTuple *tup;
+	bool first = false;
+	BlockNumber heapBlk;
+
+	Assert(!scan->xs_want_itup);
+
+	scan->xs_recheck = true;
+	scan->xs_recheckorderby = true;
+
+	/* Initialize */
+	if (opaque->bo_tuplestore == NULL)
+	{
+		first = true;
+		populate_tuplestore(scan, dir);
+
+		// No pages matched, nothing to do.
+		if (opaque->bo_store_count == 0)
+			return false;
+
+		// opaque->item.ip_posid = InvalidOffsetNumber;
+		opaque->bo_rangeidx = 0;
+		ItemPointerSet(&opaque->item, 0, InvalidOffsetNumber);
+	}
+
+	if (opaque->item.ip_posid < MaxOffsetNumber && !first)
+	{
+		// Just increment tuple ID and return next tuple from same page.
+		// "brute force" through all possible tuples on the page
+		opaque->item.ip_posid++;
+		scan->xs_ctup.t_self = opaque->item;
+		return true;
+	}
+
+	heapBlk = ItemPointerGetBlockNumberNoCheck(&opaque->item);
+	tup = opaque->bo_tuplestore[opaque->bo_rangeidx];
+
+	// We're done with this block, return next if it's still in this range
+	if (!first && heapBlk < tup->bt_blkno + opaque->bo_pagesPerRange
+		&& (heapBlk+1) < opaque->bo_heapPages)
+	{
+		// Increment heap block number & continue
+		ItemPointerSet(&opaque->item, heapBlk+1, FirstOffsetNumber);
+		scan->xs_ctup.t_self = opaque->item;
+		return true;
+	}
+
+	// Nope, go to next range
+	if (!first)
+	{
+		opaque->bo_rangeidx++;
+		tup = opaque->bo_tuplestore[opaque->bo_rangeidx];
+	}
+
+	// No more matching ranges
+	if (opaque->bo_rangeidx >= opaque->bo_store_count)
+		return false;
+
+	ItemPointerSet(&opaque->item, tup->bt_blkno, FirstOffsetNumber);
+	scan->xs_ctup.t_self = opaque->item;
+
+	return true;
+}
+
 
 /*
  * Execute the index scan.

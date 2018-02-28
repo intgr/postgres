@@ -1,0 +1,23 @@
+Surprise: more work in planner than executor. kNN-GiST already implements a
+"reorder queue" and in a generic manner too (nodeIndexScan!)
+
+----
+
+Planner:
+* PathKeys[]: (eq class, opfamily, direction, nullsfirst)
+* SortGroupClause[]: (targetlist, =op, sortop, nullsfirst)
+
+-> Executor:
+
+* Normal Sort: passes 4 individual arrays:
+  (attnums[], sortops[], collations[], nullsfirsts[]).
+  For nontrivial ORDER BY expressions, "resjunk" columns are added.
+* Index scan: doesn't need to pass any data to executor; the btree index either
+  satisfies the requested ordering or not.
+* Sorted kNN-GiST: passes 2 arrays (sortexpr[], attnums[])
+
+----
+
+I wanted to have a hacked-together proof of concept running before putting in
+any time for refactoring.
+

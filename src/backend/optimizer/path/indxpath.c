@@ -16,6 +16,7 @@
 #include "postgres.h"
 
 #include <math.h>
+#include <nodes/nodeFuncs.h>
 
 #include "access/stratnum.h"
 #include "access/sysattr.h"
@@ -999,6 +1000,16 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 													index_pathkeys);
 		orderbyclauses = NIL;
 		orderbyclausecols = NIL;
+
+		if (index->tree_height == -1) // FIXME detect BRIN?...
+		{
+			match_pathkeys_to_index(index, root->query_pathkeys,
+									&orderbyclauses,
+									&orderbyclausecols);
+			if (orderbyclauses)
+				useful_pathkeys = root->query_pathkeys;
+		}
+		// orderbyclausecols = useful_pathkeys;// root->query_pathkeys;
 	}
 	else if (index->amcanorderbyop && pathkeys_possibly_useful)
 	{
@@ -2539,6 +2550,7 @@ match_rowcompare_to_indexcol(IndexOptInfo *index,
  *		Test whether an index can produce output ordered according to the
  *		given pathkeys using "ordering operators".
  *
+ * FIXME COMMENT
  * If it can, return a list of suitable ORDER BY expressions, each of the form
  * "indexedcol operator pseudoconstant", along with an integer list of the
  * index column numbers (zero based) that each clause would be used with.
@@ -2560,8 +2572,8 @@ match_pathkeys_to_index(IndexOptInfo *index, List *pathkeys,
 	*clause_columns_p = NIL;
 
 	/* Only indexes with the amcanorderbyop property are interesting here */
-	if (!index->amcanorderbyop)
-		return;
+	//if (!index->amcanorderbyop && !index->amcanorder)
+	//	return;
 
 	foreach(lc1, pathkeys)
 	{
@@ -2601,6 +2613,7 @@ match_pathkeys_to_index(IndexOptInfo *index, List *pathkeys,
 				continue;
 
 			/*
+			 * FIXME COMMENT
 			 * We allow any column of the index to match each pathkey; they
 			 * don't have to match left-to-right as you might expect.  This is
 			 * correct for GiST, which is the sole existing AM supporting
@@ -2638,13 +2651,12 @@ match_pathkeys_to_index(IndexOptInfo *index, List *pathkeys,
 
 /*
  * match_clause_to_ordering_op
- *	  Determines whether an ordering operator expression matches an
- *	  index column.
+ *	  Determines whether an ordering expression matches an index column.
  *
  *	  This is similar to, but simpler than, match_clause_to_indexcol.
- *	  We only care about simple OpExpr cases.  The input is a bare
- *	  expression that is being ordered by, which must be of the form
- *	  (indexkey op const) or (const op indexkey) where op is an ordering
+ *	  We only care about simple OpExpr and Var cases.  The input is a bare
+ *	  expression that is being ordered by, which must be of the form (indexkey)
+ *	  or (indexkey op const) or (const op indexkey) where op is an ordering
  *	  operator for the column's opfamily.
  *
  * 'index' is the index of interest.
@@ -2677,22 +2689,35 @@ match_clause_to_ordering_op(IndexOptInfo *index,
 	bool		commuted;
 
 	/*
-	 * Clause must be a binary opclause.
+	 * Clause must be a binary opclause or var.
 	 */
-	if (!is_opclause(clause))
+	if (clause == NULL || !(IsA(clause, OpExpr) || IsA(clause, Var)))
 		return NULL;
-	leftop = get_leftop(clause);
-	rightop = get_rightop(clause);
-	if (!leftop || !rightop)
-		return NULL;
-	expr_op = ((OpExpr *) clause)->opno;
-	expr_coll = ((OpExpr *) clause)->inputcollid;
+	expr_coll = exprCollation((Node *) clause);
 
 	/*
 	 * We can forget the whole thing right away if wrong collation.
 	 */
 	if (!IndexCollMatchesExprColl(idxcollation, expr_coll))
 		return NULL;
+
+	// FIXME does this now crash with some weird operators?
+	// FIXME verify that index actually supports this pk_opfamily?
+	// FIXME BRIN indexes on expressions?
+	// If it's a simple Var, we're done.
+	if (IsA(clause, Var)) {
+		// XXX stolen from match_index_to_operand()
+		if (index->rel->relid == ((Var *) clause)->varno &&
+			index->indexkeys[indexcol] == ((Var *) clause)->varattno)
+			return clause;
+		return NULL;
+	}
+
+	leftop = get_leftop(clause);
+	rightop = get_rightop(clause);
+	if (!leftop || !rightop)
+		return NULL;
+	expr_op = ((OpExpr *) clause)->opno;
 
 	/*
 	 * Check for clauses of the form: (indexkey operator constant) or
