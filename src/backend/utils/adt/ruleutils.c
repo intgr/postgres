@@ -643,6 +643,8 @@ pg_get_viewdef_wrap(PG_FUNCTION_ARGS)
 
 	res = pg_get_viewdef_worker(viewoid, prettyFlags, wrap);
 
+	// fcinfo->arg;
+
 	if (res == NULL)
 		PG_RETURN_NULL();
 
@@ -9512,6 +9514,7 @@ get_sublink_expr(SubLink *sublink, deparse_context *context)
 	{
 		case EXISTS_SUBLINK:
 			appendStringInfoString(buf, "EXISTS ");
+			//query->;
 			break;
 
 		case ANY_SUBLINK:

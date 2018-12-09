@@ -55,6 +55,9 @@ static void sort_inner_and_outer(PlannerInfo *root, RelOptInfo *joinrel,
 static void match_unsorted_outer(PlannerInfo *root, RelOptInfo *joinrel,
 					 RelOptInfo *outerrel, RelOptInfo *innerrel,
 					 JoinType jointype, JoinPathExtraData *extra);
+static void match_unsorted_inner(PlannerInfo *root, RelOptInfo *joinrel,
+					 RelOptInfo *outerrel, RelOptInfo *innerrel,
+					 JoinType jointype, JoinPathExtraData *extra);
 static void consider_parallel_nestloop(PlannerInfo *root,
 						   RelOptInfo *joinrel,
 						   RelOptInfo *outerrel,
@@ -275,10 +278,9 @@ add_paths_to_joinrel(PlannerInfo *root,
 	 * joins at all, so it wouldn't work in the prohibited cases either.)
 	 */
 	if (mergejoin_allowed)
+	{
 		match_unsorted_outer(root, joinrel, outerrel, innerrel,
 							 jointype, &extra);
-
-#ifdef NOT_USED
 
 	/*
 	 * 3. Consider paths where the inner relation need not be explicitly
@@ -291,10 +293,10 @@ add_paths_to_joinrel(PlannerInfo *root,
 	 * those made by match_unsorted_outer when add_paths_to_joinrel() is
 	 * invoked with the two rels given in the other order.
 	 */
-	if (mergejoin_allowed)
-		match_unsorted_inner(root, joinrel, outerrel, innerrel,
-							 jointype, &extra);
-#endif
+		if (jointype == JOIN_SEMI || jointype == JOIN_ANTI)
+			match_unsorted_inner(root, joinrel, outerrel, innerrel,
+								 jointype, &extra);
+	}
 
 	/*
 	 * 4. Consider paths where both outer and inner relations must be hashed
@@ -1541,6 +1543,456 @@ match_unsorted_outer(PlannerInfo *root,
 										inner_cheapest_total);
 	}
 }
+
+/*
+ * match_unsorted_outer
+ *	  Creates possible join paths for processing a single join relation
+ *	  'joinrel' by employing either iterative substitution or
+ *	  mergejoining on each of its possible outer paths (considering
+ *	  only outer paths that are already ordered well enough for merging).
+ *
+ * We always generate a nestloop path for each available outer path.
+ * In fact we may generate as many as five: one on the cheapest-total-cost
+ * inner path, one on the same with materialization, one on the
+ * cheapest-startup-cost inner path (if different), one on the
+ * cheapest-total inner-indexscan path (if any), and one on the
+ * cheapest-startup inner-indexscan path (if different).
+ *
+ * We also consider mergejoins if mergejoin clauses are available.  See
+ * detailed comments in generate_mergejoin_paths.
+ *
+ * 'joinrel' is the join relation
+ * 'outerrel' is the outer join relation
+ * 'innerrel' is the inner join relation
+ * 'jointype' is the type of join to do
+ * 'extra' contains additional input values
+ */
+static void
+match_unsorted_inner(PlannerInfo *root,
+					 RelOptInfo *joinrel,
+					 RelOptInfo *outerrel,
+					 RelOptInfo *innerrel,
+					 JoinType jointype,
+					 JoinPathExtraData *extra)
+{
+	JoinType	save_jointype = jointype;
+	bool		useallclauses;
+	bool 		is_partial = false;
+	Path	   *outer_cheapest_total = outerrel->cheapest_total_path;
+	ListCell   *lc1;
+
+	Assert(jointype == JOIN_ANTI || jointype == JOIN_SEMI);
+
+	useallclauses = false;
+
+	/*
+	 * If inner_cheapest_total is parameterized by the outer rel, ignore it;
+	 * we will consider it below as a member of cheapest_parameterized_paths,
+	 * but the other possibilities considered in this routine aren't usable.
+	 */
+	if (PATH_PARAM_BY_REL(outer_cheapest_total, outerrel))  // ????
+		outer_cheapest_total = NULL;
+
+	foreach(lc1, innerrel->pathlist)
+	{
+		Path	   *innerpath = (Path *) lfirst(lc1);
+		List	   *merge_pathkeys;
+		List	   *mergeclauses;
+		List	   *outersortkeys;
+		List	   *trialsortkeys;
+		Path	   *cheapest_startup_outer;
+		Path	   *cheapest_total_outer;
+		// JoinType	save_jointype = jointype;
+		int			num_sortkeys;
+		int			sortkeycnt;
+
+		/*
+		 * We cannot use an inner path that is parameterized by the outer rel.
+		 */
+		//if (PATH_PARAM_BY_REL(innerpath, outerrel))
+		//	continue;
+
+		/*
+		 * The result will have this sort order (even if it is implemented as
+		 * a nestloop, and even if some of the mergeclauses are implemented by
+		 * qpquals rather than as true mergeclauses):
+		 */
+		merge_pathkeys = build_join_pathkeys(root, joinrel, jointype,
+											 innerpath->pathkeys);
+
+		/* Can't do anything else if inner rel is parameterized by outer */
+		if (outer_cheapest_total == NULL)
+			continue;
+
+		/* Generate merge join paths */
+		//generate_mergejoin_paths(root, joinrel, innerrel, innerpath,
+		//						 save_jointype, extra, useallclauses,
+		//						 outer_cheapest_total, merge_pathkeys,
+		//						 false);
+		/* Look for useful mergeclauses (if any) */
+		mergeclauses = find_mergeclauses_for_pathkeys(root,
+													  innerpath->pathkeys,
+													  false,
+													  extra->mergeclause_list);
+
+		/*
+		 * Done with this outer path if no chance for a mergejoin.
+		 *
+		 * Special corner case: for "x FULL JOIN y ON true", there will be no join
+		 * clauses at all.  Ordinarily we'd generate a clauseless nestloop path,
+		 * but since mergejoin is our only join type that supports FULL JOIN
+		 * without any join clauses, it's necessary to generate a clauseless
+		 * mergejoin path instead.
+		 */
+		if (mergeclauses == NIL)
+			return;
+
+		/* Compute the required ordering of the inner path */
+		outersortkeys = make_inner_pathkeys_for_merge(root,
+													  mergeclauses,
+													  innerpath->pathkeys);
+
+		/*
+		 * Generate a mergejoin on the basis of sorting the cheapest inner. Since
+		 * a sort will be needed, only cheapest total cost matters. (But
+		 * try_mergejoin_path will do the right thing if inner_cheapest_total is
+		 * already correctly sorted.)
+		 */
+		try_mergejoin_path(root,
+						   joinrel,
+						   outer_cheapest_total,
+						   innerpath,
+						   merge_pathkeys,
+						   mergeclauses,
+						   outersortkeys,
+						   NIL,
+						   jointype,
+						   extra,
+						   is_partial);
+
+		/*
+		 * Look for presorted inner paths that satisfy the innersortkey list ---
+		 * or any truncation thereof, if we are allowed to build a mergejoin using
+		 * a subset of the merge clauses.  Here, we consider both cheap startup
+		 * cost and cheap total cost.
+		 *
+		 * Currently we do not consider parameterized inner paths here. This
+		 * interacts with decisions elsewhere that also discriminate against
+		 * mergejoins with parameterized inputs; see comments in
+		 * src/backend/optimizer/README.
+		 *
+		 * As we shorten the sortkey list, we should consider only paths that are
+		 * strictly cheaper than (in particular, not the same as) any path found
+		 * in an earlier iteration.  Otherwise we'd be intentionally using fewer
+		 * merge keys than a given path allows (treating the rest as plain
+		 * joinquals), which is unlikely to be a good idea.  Also, eliminating
+		 * paths here on the basis of compare_path_costs is a lot cheaper than
+		 * building the mergejoin path only to throw it away.
+		 *
+		 * If inner_cheapest_total is well enough sorted to have not required a
+		 * sort in the path made above, we shouldn't make a duplicate path with
+		 * it, either.  We handle that case with the same logic that handles the
+		 * previous consideration, by initializing the variables that track
+		 * cheapest-so-far properly.  Note that we do NOT reject
+		 * inner_cheapest_total if we find it matches some shorter set of
+		 * pathkeys.  That case corresponds to using fewer mergekeys to avoid
+		 * sorting inner_cheapest_total, whereas we did sort it above, so the
+		 * plans being considered are different.
+		 */
+		if (pathkeys_contained_in(outersortkeys,
+								  outer_cheapest_total->pathkeys))
+		{
+			/* inner_cheapest_total didn't require a sort */
+			cheapest_startup_outer = outer_cheapest_total;
+			cheapest_total_outer = outer_cheapest_total;
+		}
+		else
+		{
+			/* it did require a sort, at least for the full set of keys */
+			cheapest_startup_outer = NULL;
+			cheapest_total_outer = NULL;
+		}
+		num_sortkeys = list_length(outersortkeys);
+		if (num_sortkeys > 1 && !useallclauses)
+			trialsortkeys = list_copy(outersortkeys);	/* need modifiable copy */
+		else
+			trialsortkeys = outersortkeys;	/* won't really truncate */
+
+		for (sortkeycnt = num_sortkeys; sortkeycnt > 0; sortkeycnt--)
+		{
+			Path	   *outerpath;
+			List	   *newclauses = NIL;
+
+			/*
+			 * Look for an inner path ordered well enough for the first
+			 * 'sortkeycnt' innersortkeys.  NB: trialsortkeys list is modified
+			 * destructively, which is why we made a copy...
+			 */
+			trialsortkeys = list_truncate(trialsortkeys, sortkeycnt);
+			outerpath = get_cheapest_path_for_pathkeys(outerrel->pathlist,
+													   trialsortkeys,
+													   NULL,
+													   TOTAL_COST,
+													   is_partial);
+			if (outerpath != NULL &&
+				(cheapest_total_outer == NULL ||
+				 compare_path_costs(outerpath, cheapest_total_outer,  // ???
+									TOTAL_COST) < 0))
+			{
+				/* Found a cheap (or even-cheaper) sorted path */
+				/* Select the right mergeclauses, if we didn't already */
+				if (sortkeycnt < num_sortkeys)
+				{
+					newclauses =
+							find_mergeclauses_for_pathkeys(root,
+														   trialsortkeys,
+														   false,
+														   mergeclauses);
+					Assert(newclauses != NIL);
+				}
+				else
+					newclauses = mergeclauses;
+				try_mergejoin_path(root,
+								   joinrel,
+								   outerpath,
+								   innerpath,
+								   merge_pathkeys,
+								   newclauses,
+								   NIL,
+								   NIL,
+								   jointype,
+								   extra,
+								   is_partial);
+				cheapest_total_outer = innerpath;
+			}
+			/* Same on the basis of cheapest startup cost ... */
+			innerpath = get_cheapest_path_for_pathkeys(outerrel->pathlist,
+													   trialsortkeys,
+													   NULL,
+													   STARTUP_COST,
+													   is_partial);
+			if (outerpath != NULL &&
+				(cheapest_startup_outer == NULL ||
+				 compare_path_costs(outerpath, cheapest_startup_outer,
+									STARTUP_COST) < 0))
+			{
+				/* Found a cheap (or even-cheaper) sorted path */
+				if (outerpath != cheapest_total_outer)
+				{
+					/*
+					 * Avoid rebuilding clause list if we already made one; saves
+					 * memory in big join trees...
+					 */
+					if (newclauses == NIL)
+					{
+						if (sortkeycnt < num_sortkeys)
+						{
+							newclauses =
+									find_mergeclauses_for_pathkeys(root,
+																   trialsortkeys,
+																   false,
+																   mergeclauses);
+							Assert(newclauses != NIL);
+						}
+						else
+							newclauses = mergeclauses;
+					}
+					try_mergejoin_path(root,
+									   joinrel,
+									   outerpath,
+									   innerpath,
+									   merge_pathkeys,
+									   newclauses,
+									   NIL,
+									   NIL,
+									   jointype,
+									   extra,
+									   is_partial);
+				}
+				cheapest_startup_outer = outerpath;
+			}
+
+			/*
+			 * Don't consider truncated sortkeys if we need all clauses.
+			 */
+			if (useallclauses)
+				break;
+		}
+	}
+
+	/*
+	 * Consider partial nestloop and mergejoin plan if outerrel has any
+	 * partial path and the joinrel is parallel-safe.  However, we can't
+	 * handle JOIN_UNIQUE_OUTER, because the outer path will be partial, and
+	 * therefore we won't be able to properly guarantee uniqueness.  Nor can
+	 * we handle extra_lateral_rels, since partial paths must not be
+	 * parameterized. Similarly, we can't handle JOIN_FULL and JOIN_RIGHT,
+	 * because they can produce false null extended rows.
+	 */
+	if (joinrel->consider_parallel &&
+		save_jointype != JOIN_UNIQUE_OUTER &&
+		save_jointype != JOIN_FULL &&
+		save_jointype != JOIN_RIGHT &&
+		outerrel->partial_pathlist != NIL &&
+		bms_is_empty(joinrel->lateral_relids))
+	{
+		/*
+		 * If inner_cheapest_total is NULL or non parallel-safe then find the
+		 * cheapest total parallel safe path.  If doing JOIN_UNIQUE_INNER, we
+		 * can't use any alternative inner path.
+		 */
+		if (outer_cheapest_total == NULL ||
+			!outer_cheapest_total->parallel_safe)
+		{
+			outer_cheapest_total = get_cheapest_parallel_safe_total_inner(
+																		  innerrel->pathlist);
+		}
+
+		if (outer_cheapest_total)
+			consider_parallel_mergejoin(root, joinrel, outerrel, innerrel,
+										save_jointype, extra,
+										outer_cheapest_total);
+	}
+}
+
+/*
+ * match_unsorted_inner
+ *	  Generate mergejoin paths that use an explicit sort of the outer path
+ *	  with an already-ordered inner path.
+ *
+ * 'joinrel' is the join result relation
+ * 'outerrel' is the outer join relation
+ * 'innerrel' is the inner join relation
+ * 'restrictlist' contains all of the RestrictInfo nodes for restriction
+ *		clauses that apply to this join
+ * 'mergeclause_list' is a list of RestrictInfo nodes for available
+ *		mergejoin clauses in this join
+ * 'jointype' is the type of join to do
+ */
+#if 0
+static void
+match_unsorted_inner(Query *root,
+					 RelOptInfo *joinrel,
+					 RelOptInfo *outerrel,
+					 RelOptInfo *innerrel,
+					 JoinType jointype,
+					 JoinPathExtraData *extra)
+{
+	bool		useallclauses;
+	List	   *i;
+
+	switch (jointype)
+	{
+		case JOIN_INNER:
+		case JOIN_LEFT:
+			useallclauses = false;
+			break;
+		case JOIN_RIGHT:
+		case JOIN_FULL:
+			useallclauses = true;
+			break;
+		default:
+			elog(ERROR, "match_unsorted_inner: unexpected join type %d",
+				 (int) jointype);
+			useallclauses = false;		/* keep compiler quiet */
+			break;
+	}
+
+	foreach(i, innerrel->pathlist)
+	{
+		Path	   *innerpath = (Path *) lfirst(i);
+		List	   *mergeclauses;
+		List	   *outersortkeys;
+		List	   *merge_pathkeys;
+		Path	   *totalouterpath;
+		Path	   *startupouterpath;
+
+		/* Look for useful mergeclauses (if any) */
+		mergeclauses = find_mergeclauses_for_pathkeys(root,
+													  innerpath->pathkeys,
+													  mergeclause_list,
+													  extra->mergeclause_list);
+
+		/* Done with this inner path if no chance for a mergejoin */
+		if (mergeclauses == NIL)
+			continue;
+		if (useallclauses && length(mergeclauses) != length(mergeclause_list))
+			continue;
+
+		/* Compute the required ordering of the outer path */
+		outersortkeys = make_pathkeys_for_mergeclauses(root,
+													   mergeclauses,
+													   outerrel);
+
+		/*
+		 * Generate a mergejoin on the basis of sorting the cheapest
+		 * outer. Since a sort will be needed, only cheapest total cost
+		 * matters.
+		 */
+		merge_pathkeys = build_join_pathkeys(root, joinrel, outersortkeys);
+		add_path(joinrel, (Path *)
+				create_mergejoin_path(root,
+									  joinrel,
+									  jointype,
+									  outerrel->cheapest_total_path,
+									  innerpath,
+									  restrictlist,
+									  merge_pathkeys,
+									  mergeclauses,
+									  outersortkeys,
+									  NIL));
+
+		/*
+		 * Now generate mergejoins based on already-sufficiently-ordered
+		 * outer paths.  There's likely to be some redundancy here with
+		 * paths already generated by merge_unsorted_outer ... but since
+		 * merge_unsorted_outer doesn't consider all permutations of the
+		 * mergeclause list, it may fail to notice that this particular
+		 * innerpath could have been used with this outerpath.
+		 */
+		totalouterpath = get_cheapest_path_for_pathkeys(outerrel->pathlist,
+														outersortkeys,
+														TOTAL_COST);
+		if (totalouterpath == NULL)
+			continue;			/* there won't be a startup-cost path
+								 * either */
+
+		merge_pathkeys = build_join_pathkeys(root, joinrel,
+											 totalouterpath->pathkeys);
+		add_path(joinrel, (Path *)
+				create_mergejoin_path(root,
+									  joinrel,
+									  jointype,
+									  totalouterpath,
+									  innerpath,
+									  restrictlist,
+									  merge_pathkeys,
+									  mergeclauses,
+									  NIL,
+									  NIL));
+
+		startupouterpath = get_cheapest_path_for_pathkeys(outerrel->pathlist,
+														  outersortkeys,
+														  STARTUP_COST);
+		if (startupouterpath != NULL && startupouterpath != totalouterpath)
+		{
+			merge_pathkeys = build_join_pathkeys(root, joinrel,
+												 startupouterpath->pathkeys);
+			add_path(joinrel, (Path *)
+					create_mergejoin_path(root,
+										  joinrel,
+										  jointype,
+										  startupouterpath,
+										  innerpath,
+										  restrictlist,
+										  merge_pathkeys,
+										  mergeclauses,
+										  NIL,
+										  NIL));
+		}
+	}
+}
+#endif
 
 /*
  * consider_parallel_mergejoin
